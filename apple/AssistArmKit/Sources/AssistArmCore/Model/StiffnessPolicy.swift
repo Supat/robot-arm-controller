@@ -37,11 +37,36 @@ public struct StiffnessPolicy: Codable, Sendable, Equatable {
     public var softCompliance: UInt8
     public var stiffCompliance: UInt8
 
-    public init(mode: StiffnessMode = .highOrLow, threshold: Double = 40, softCompliance: UInt8 = 0xFF, stiffCompliance: UInt8 = 0x32) {
+    /// How normalised stiffness 0…100 is scaled.
+    ///
+    /// The legacy demo evaluated the stiffness model at the *raw* quasi-tension minimum and
+    /// maximum from calibration to get the 0 and 100 points, while feeding it normalised 0…1
+    /// activations. With EMG in volts that span is tiny, so normalised stiffness is ~0 only when
+    /// both muscles rest and jumps to 100 as soon as either is active: the servo goes stiff for
+    /// flexion *and* extension and the arm follows the equilibrium both ways. Scaling over the
+    /// 0…1 activation cube instead makes stiffness ≈ flexor activation with these parameters, so
+    /// extension phases stay soft and the arm barely extends.
+    public var legacyScaling: Bool
+
+    public init(mode: StiffnessMode = .highOrLow, threshold: Double = 40, softCompliance: UInt8 = 0xFF, stiffCompliance: UInt8 = 0x32,
+                legacyScaling: Bool = true) {
         self.mode = mode
         self.threshold = min(100, max(0, threshold))
         self.softCompliance = softCompliance
         self.stiffCompliance = stiffCompliance
+        self.legacyScaling = legacyScaling
+    }
+
+    private enum CodingKeys: String, CodingKey { case mode, threshold, softCompliance, stiffCompliance, legacyScaling }
+
+    /// Tolerates settings saved by older builds that lack newer keys.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try c.decodeIfPresent(StiffnessMode.self, forKey: .mode) ?? .highOrLow
+        threshold = try c.decodeIfPresent(Double.self, forKey: .threshold) ?? 40
+        softCompliance = try c.decodeIfPresent(UInt8.self, forKey: .softCompliance) ?? 0xFF
+        stiffCompliance = try c.decodeIfPresent(UInt8.self, forKey: .stiffCompliance) ?? 0x32
+        legacyScaling = try c.decodeIfPresent(Bool.self, forKey: .legacyScaling) ?? true
     }
 
     /// Compliance the servo should have before any estimate exists.

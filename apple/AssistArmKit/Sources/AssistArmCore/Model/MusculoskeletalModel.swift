@@ -139,6 +139,34 @@ public struct JointEstimator: Sendable {
 
     public var channelCount: Int { equilibriumModel.channelCount }
 
+    /// Legacy file names inside a parameter folder.
+    public static let equilibriumFileName = "param_eq.txt"
+    public static let torqueFileName = "param_trq.txt"
+
+    /// Loads a subject's parameter pair from two legacy-format files.
+    public init(equilibriumURL: URL, torqueURL: URL, channelCount: Int = 2) throws {
+        self.init(equilibriumModel: try SingleJointModel(channelCount: channelCount, contentsOf: equilibriumURL),
+                  stiffnessModel: try SingleJointModel(channelCount: channelCount, contentsOf: torqueURL))
+    }
+
+    /// Loads `param_eq.txt` and `param_trq.txt` from a folder (the legacy `parameter/` directory).
+    public init(folder: URL, channelCount: Int = 2) throws {
+        try self.init(equilibriumURL: folder.appending(path: Self.equilibriumFileName),
+                      torqueURL: folder.appending(path: Self.torqueFileName), channelCount: channelCount)
+    }
+
+    /// Equilibrium angles (degrees) at rest and with each muscle alone at full activation,
+    /// for showing what a parameter set does.
+    public var summary: (rest: Double, perMuscle: [Double]) {
+        let n = channelCount
+        let rest = equilibriumModel.equilibrium(Array(repeating: 0, count: n)) * 180 / .pi
+        let per = (0..<n).map { i -> Double in
+            var u = Array(repeating: 0.0, count: n); u[i] = 1
+            return equilibriumModel.equilibrium(u) * 180 / .pi
+        }
+        return (rest, per)
+    }
+
     /// Stiffness is linear in the activations, so its extremes over normalised activations
     /// in [0, 1]^n lie at the corners of the cube.
     ///
@@ -156,6 +184,22 @@ public struct JointEstimator: Sendable {
         }
         if hi <= lo { hi = lo + 1 }
         return lo...hi
+    }
+
+    /// The legacy stiffness range: the model evaluated at the raw calibration minimum and maximum
+    /// (`MSJointStateShin::calcMinStiffness/calcMaxStiffness(daq->dQtMin/dQtMax)`).
+    public static func legacyStiffnessRange(of model: SingleJointModel, rawRange: ActivationRange) -> ClosedRange<Double> {
+        let lo = model.stiffness(rawRange.minimum)
+        var hi = model.stiffness(rawRange.maximum)
+        if hi <= lo { hi = lo + 1e-9 }
+        return lo...hi
+    }
+
+    /// A copy whose 0…100 stiffness scale follows the legacy raw-range convention for `rawRange`.
+    public func withLegacyStiffnessRange(_ rawRange: ActivationRange) -> JointEstimator {
+        var copy = self
+        copy.stiffnessRange = Self.legacyStiffnessRange(of: stiffnessModel, rawRange: rawRange)
+        return copy
     }
 
     public func estimate(_ activation: [Double]) -> JointEstimate {

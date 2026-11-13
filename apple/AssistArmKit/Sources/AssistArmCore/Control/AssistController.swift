@@ -190,7 +190,7 @@ public actor AssistController {
     private func step(_ sample: QuasiTensionSample, time: Double, writeGoal: Bool, pollStatus: Bool) async throws -> ControlSample {
         let c = configuration
         let activation = range.normalize(sample.values)
-        let estimate = estimator.estimate(activation)
+        let estimate = (c.stiffness.legacyScaling ? estimator.withLegacyStiffnessRange(range) : estimator).estimate(activation)
 
         let wanted = c.stiffness.compliance(normalizedStiffness: estimate.normalizedStiffness)
         if wanted != compliance {

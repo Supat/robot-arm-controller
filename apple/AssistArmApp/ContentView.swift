@@ -82,6 +82,7 @@ struct ControlPanel: View {
             emgSection
             servoSection
             calibrationSection
+            modelSection
             modeSection
             controlSection
             logSection
@@ -220,6 +221,31 @@ struct ControlPanel: View {
         }
     }
 
+    @ViewBuilder private var modelSection: some View {
+        Section {
+            LabeledContent("Parameters") {
+                Text(model.usesBundledParameters ? "Built-in (legacy demo)" : URL(filePath: model.paramEqPath).deletingLastPathComponent().lastPathComponent)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(model.usesBundledParameters ? "param_eq.txt and param_trq.txt shipped with the legacy demo" : model.paramEqPath + "\n" + model.paramTrqPath)
+            }
+            HStack {
+                Button("Choose…") { model.chooseParameterFiles() }
+                if !model.usesBundledParameters {
+                    Button("Use built-in") { model.useBundledParameters() }
+                }
+            }
+            .disabled(model.isControlling)
+        } header: {
+            Text("Model")
+        } footer: {
+            let s = model.estimator.summary
+            Text(String(format: "Subject's param_eq.txt and param_trq.txt. Equilibrium at rest %.1f°, flexor only %.1f°, extensor only %.1f°.",
+                        s.rest, s.perMuscle[0], s.perMuscle[1]))
+        }
+    }
+
     @ViewBuilder private var modeSection: some View {
         @Bindable var model = model
         Section {
@@ -250,6 +276,8 @@ struct ControlPanel: View {
                     TextField("", value: $model.configuration.maxTorquePercent, format: .number).labelsHidden().frame(width: 60)
                 }
                 Toggle("Mirror right servo", isOn: $model.configuration.mirrorRight)
+                Toggle("Legacy stiffness scaling", isOn: $model.configuration.stiffness.legacyScaling)
+                    .help("Scale normalised stiffness between the model's values at the raw calibration minimum and maximum, as the legacy demo did. Off: scale over the 0…1 activation cube.")
             }
             .multilineTextAlignment(.trailing)
         } header: {

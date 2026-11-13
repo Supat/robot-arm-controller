@@ -63,4 +63,17 @@ final class ModelTests: XCTestCase {
         XCTAssertEqual(p.compliance(normalizedStiffness: 100), 0x32)
         XCTAssertEqual(p.compliance(normalizedStiffness: 70), UInt8((255.0 + (50.0 - 255.0) * 0.5).rounded()))
     }
+
+    func testLegacyStiffnessScalingIsStiffForEitherMuscle() throws {
+        let est = try JointEstimator.legacyDefault()
+        // Trigno-scale quasi-tension in volts.
+        let raw = ActivationRange(minimum: [2.5e-5, 2.9e-6], maximum: [6.6e-5, 3.4e-6])
+        let legacy = est.withLegacyStiffnessRange(raw)
+        XCTAssertEqual(legacy.estimate([0, 0]).normalizedStiffness, 0, accuracy: 1e-6)
+        XCTAssertEqual(legacy.estimate([0, 0.2]).normalizedStiffness, 100, accuracy: 1e-6)   // extensor alone → stiff
+        XCTAssertEqual(legacy.estimate([0.2, 0]).normalizedStiffness, 100, accuracy: 1e-6)
+        // Cube scaling: extensor alone stays nearly 0 with these parameters.
+        XCTAssertLessThan(est.estimate([0, 1]).normalizedStiffness, 1)
+        XCTAssertGreaterThan(est.estimate([1, 0]).normalizedStiffness, 99)
+    }
 }

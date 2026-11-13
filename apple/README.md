@@ -94,6 +94,10 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
    reads the resting angles as zero offsets, sets max torque 75 % and turns torque off, exactly
    like the legacy Init Servo button.
 3. **Calibrate**: relax, then contract each muscle fully, then stop. The range is saved.
+   **Model**: "Choose…" loads a subject's `param_eq.txt` and `param_trq.txt` (pick the legacy
+   `parameter/` folder or both files); the built-in set is the one shipped with the legacy demo.
+   The footer shows the equilibrium angle at rest and with each muscle alone, so a wrong file is
+   obvious. The CLI takes `--params DIR`.
 4. **Mode** and threshold, then **Start**. Telemetry goes to
    `~/Documents/AssistArm/Recordings/assist-<timestamp>.csv`.
 
@@ -107,6 +111,11 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
   rate makes them crawl at a fraction of full speed, so goals are written at `goalUpdateRate`
   (20 Hz by default, "Goal write rate" under Advanced); 10–20 Hz tracked a sweeping goal with
   about 0.2 s lag on the bench. `assist-arm track` reproduces the measurement.
+- Normalised stiffness uses the legacy scaling by default ("Legacy stiffness scaling" under
+  Advanced): the stiffness model is evaluated at the raw calibration minimum and maximum, which
+  with EMG in volts makes the servo stiff whenever either muscle is active, so the arm follows
+  the equilibrium in flexion and extension alike. The alternative scales over the 0…1 activation
+  cube; with the shipped parameters that is ≈ flexor activation, so extension phases stay soft.
 - Compliance slope is in degrees: 0xFF means torque ramps over 255° (very soft), 0x32 over 50°.
   Under load the servo settles several degrees short of its goal at 0x32; that is the legacy
   "stiff" setting, not a fault.

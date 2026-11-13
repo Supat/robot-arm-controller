@@ -19,9 +19,12 @@ import TrignoKit
 //     --stream Delsys --columns 0,1   LSL stream and columns
 //     --servo mock|/dev/cu.usbserial-X|usb://vid:pid[@loc]|tcp://host:port   (default mock)
 //     --mode linear|low|high|highOrLow --threshold 40
+//     --stiffness-scaling legacy|cube  (default legacy: stiffness 0…100 spans the raw calibration range)
 //     --calibrate 8                   seconds of calibration (default 8)
 //     --duration 20                   seconds of control (default 20)
 //     --log out.csv                   telemetry CSV
+//     --params DIR                    folder with the subject's param_eq.txt and param_trq.txt
+//     --param-eq FILE --param-trq FILE   or the two files individually (default: built-in legacy set)
 
 struct Options {
     var command = "run"
@@ -239,7 +242,8 @@ func cmdRun(_ o: Options) async throws {
     try await servo.open()
     var config = ControlConfiguration()
     config.stiffness = StiffnessPolicy(mode: StiffnessMode(rawValue: o["mode", default: "highOrLow"]) ?? .highOrLow,
-                                       threshold: o.double("threshold", default: 40))
+                                       threshold: o.double("threshold", default: 40),
+                                       legacyScaling: o["stiffness-scaling", default: "legacy"] != "cube")
 
     log("Zeroing servos (\(servo.name))…")
     let zero = try await ServoSetup.zero(servo, configuration: config)
@@ -255,7 +259,17 @@ func cmdRun(_ o: Options) async throws {
     let range = await calibrator.stop()
     log("Range: min \(range.minimum.map { String(format: "%.3g", $0) })  max \(range.maximum.map { String(format: "%.3g", $0) })")
 
-    let estimator = try JointEstimator.legacyDefault()
+    let estimator: JointEstimator
+    if !o["params"].isEmpty {
+        estimator = try JointEstimator(folder: URL(filePath: o["params"]))
+        log("Model parameters from \(o["params"])")
+    } else if !o["param-eq"].isEmpty || !o["param-trq"].isEmpty {
+        estimator = try JointEstimator(equilibriumURL: URL(filePath: o["param-eq"]), torqueURL: URL(filePath: o["param-trq"]))
+    } else {
+        estimator = try JointEstimator.legacyDefault()
+    }
+    let summary = estimator.summary
+    log(String(format: "Model: rest %.1f°, flexor only %.1f°, extensor only %.1f°", summary.rest, summary.perMuscle[0], summary.perMuscle[1]))
     let controller = try await AssistController(pipeline: pipeline, servo: servo, estimator: estimator, range: range, configuration: config)
     let telemetry = o["log"].isEmpty ? nil : try TelemetryLog(url: URL(filePath: o["log"]), channelCount: source.channelCount)
     let printer = Printer()

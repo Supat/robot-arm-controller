@@ -104,7 +104,11 @@ final class AppModel {
     private var controller: AssistController?
     private var telemetry: TelemetryLog?
     private var calibrationMonitor: Task<Void, Never>?
-    private let estimator: JointEstimator
+    private(set) var estimator: JointEstimator
+    /// Paths of the subject's parameter files; empty means the built-in legacy set.
+    var paramEqPath = "" { didSet { defaults.set(paramEqPath, forKey: "paramEqPath") } }
+    var paramTrqPath = "" { didSet { defaults.set(paramTrqPath, forKey: "paramTrqPath") } }
+    var usesBundledParameters: Bool { paramEqPath.isEmpty && paramTrqPath.isEmpty }
 
     var emgConnected: Bool { emgPhase == .connected }
     var servoConnected: Bool { servoPhase == .connected }
@@ -122,6 +126,16 @@ final class AppModel {
         estimator = (try? JointEstimator.legacyDefault()) ?? JointEstimator(
             equilibriumModel: try! SingleJointModel(channelCount: 2, parameters: [0, 0, 0, 0, 0, -1, 0, 0, 0]),
             stiffnessModel: try! SingleJointModel(channelCount: 2, parameters: [0, 0, 0, 0, 0, -1, -1, -1, 0]))
+        paramEqPath = defaults.string(forKey: "paramEqPath") ?? ""
+        paramTrqPath = defaults.string(forKey: "paramTrqPath") ?? ""
+        if !usesBundledParameters {
+            do {
+                estimator = try JointEstimator(equilibriumURL: URL(filePath: paramEqPath), torqueURL: URL(filePath: paramTrqPath))
+            } catch {
+                paramEqPath = ""; paramTrqPath = ""
+                log.append(LogEntry(text: "Could not reload model parameters, using built-in set: \(error.localizedDescription)", isError: true))
+            }
+        }
         if let s = defaults.string(forKey: "emgKind"), let k = EMGSourceKind(rawValue: s) { emgKind = k }
         if let s = defaults.string(forKey: "servoKind"), let k = ServoKind(rawValue: s) { servoKind = k }
         trignoHost = defaults.string(forKey: "trignoHost") ?? trignoHost
@@ -379,6 +393,61 @@ final class AppModel {
         #endif
     }
 
+    // MARK: Model parameters
+
+    /// Lets the user pick the legacy `parameter/` folder or the two files `param_eq.txt` and `param_trq.txt`.
+    func chooseParameterFiles() {
+        #if os(macOS)
+        let panel = NSOpenPanel()
+        panel.title = "Choose model parameters"
+        panel.message = "Select the folder containing param_eq.txt and param_trq.txt, or both files."
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.plainText]
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        var eq: URL?, trq: URL?
+        if urls.count == 1, (try? urls[0].resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            eq = urls[0].appending(path: JointEstimator.equilibriumFileName)
+            trq = urls[0].appending(path: JointEstimator.torqueFileName)
+        } else {
+            for u in urls {
+                let name = u.lastPathComponent.lowercased()
+                if name.contains("eq") { eq = u } else if name.contains("trq") || name.contains("torque") || name.contains("stiff") { trq = u }
+            }
+        }
+        guard let eq, let trq else {
+            fail(ModelError.badParameterFile("pick the parameter folder, or both files (names containing \"eq\" and \"trq\")"))
+            return
+        }
+        loadParameters(equilibrium: eq, torque: trq)
+        #endif
+    }
+
+    func loadParameters(equilibrium: URL, torque: URL) {
+        do {
+            estimator = try JointEstimator(equilibriumURL: equilibrium, torqueURL: torque)
+            paramEqPath = equilibrium.path
+            paramTrqPath = torque.path
+            controller = nil   // the next start uses the new model
+            let s = estimator.summary
+            info(String(format: "Model parameters loaded from %@: rest %.1f°, flexor %.1f°, extensor %.1f°",
+                        equilibrium.deletingLastPathComponent().path, s.rest, s.perMuscle[0], s.perMuscle[1]))
+        } catch {
+            fail(error)
+        }
+    }
+
+    func useBundledParameters() {
+        guard let e = try? JointEstimator.legacyDefault() else { return }
+        estimator = e
+        paramEqPath = ""
+        paramTrqPath = ""
+        controller = nil
+        info("Using the built-in legacy model parameters")
+    }
+
     // MARK: Log
 
     func info(_ text: String) {
@@ -395,6 +464,7 @@ final class AppModel {
 
 #if os(macOS)
 import AppKit
+import UniformTypeIdentifiers
 #endif
 
 /// Wraps an error with a hint for the user.
