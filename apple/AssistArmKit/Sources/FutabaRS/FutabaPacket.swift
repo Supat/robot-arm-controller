@@ -4,7 +4,10 @@ import Foundation
 /// Futaba RS-series (RS30x/RS40x) command servo protocol: short packets, return packets,
 /// and the memory-map addresses the controller uses. Bytes follow the legacy `ControlServo.cpp`.
 public enum Futaba {
+    /// Header of packets the host sends.
     public static let header: [UInt8] = [0xFA, 0xAF]
+    /// Header of return packets the servo sends.
+    public static let returnHeader: [UInt8] = [0xFD, 0xDF]
     public static let baudRate = 115200
 
     /// Memory map (RAM) addresses.
@@ -97,7 +100,7 @@ public enum Futaba {
             }
             func i16(_ offset: Int) -> Int16 { Int16(bitPattern: UInt16(data[offset]) | UInt16(data[offset + 1]) << 8) }
             return ServoStatus(position: i16(0), elapsedTime: i16(2), speed: i16(4),
-                               current: i16(6), temperature: i16(8), voltage: i16(10))
+                               current: i16(6), temperature: i16(8), voltage: i16(10), raw: data)
         }
     }
 
@@ -108,7 +111,9 @@ public enum Futaba {
     public static func parse(_ bytes: [UInt8]) -> (packet: Packet, consumed: Int)? {
         var start = 0
         while start + 7 <= bytes.count {
-            guard bytes[start] == 0xFA, bytes[start + 1] == 0xAF else { start += 1; continue }
+            let isCommand = bytes[start] == 0xFA && bytes[start + 1] == 0xAF
+            let isReturn = bytes[start] == 0xFD && bytes[start + 1] == 0xDF
+            guard isCommand || isReturn else { start += 1; continue }
             let head = bytes[start..<(start + 7)]
             let total = Packet.totalLength(head: head)
             guard start + total <= bytes.count else { return nil }

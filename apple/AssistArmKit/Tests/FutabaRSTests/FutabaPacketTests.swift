@@ -34,7 +34,7 @@ final class FutabaPacketTests: XCTestCase {
         for v in [900, 5, -10, 120, 33, 740].map { Int16($0) } { let u = UInt16(bitPattern: v); data += [UInt8(u & 0xFF), UInt8(u >> 8)] }
         data += Array(repeating: 0, count: 6)
         let body: [UInt8] = [0x01, 0x00, 0x2A, 0x12, 0x01] + data
-        let ret = [0xFA, 0xAF] + body + [body.reduce(0, ^)]
+        let ret = Futaba.returnHeader + body + [body.reduce(0, ^)]
         XCTAssertEqual(ret.count, Futaba.statusReturnLength)
 
         // Garbage, then the echoed request, then the return packet.
@@ -98,7 +98,7 @@ final class ScriptedTransport: ServoTransport, @unchecked Sendable {
                 let u = UInt16(bitPattern: goal)
                 let data: [UInt8] = [UInt8(u & 0xFF), UInt8(u >> 8)] + Array(repeating: 0, count: 16)
                 let body: [UInt8] = [p.id, 0x00, 0x2A, 0x12, 0x01] + data
-                inbox += [0xFA, 0xAF] + body + [body.reduce(0, ^)]
+                inbox += Futaba.returnHeader + body + [body.reduce(0, ^)]
             }
         }
     }

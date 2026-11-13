@@ -230,10 +230,16 @@ final class AppModel {
         guard servoPhase == .disconnected else { return }
         servoPhase = .connecting
         let driver: ServoDriver
-        switch servoKind {
-        case .mock: driver = MockServoDriver()
-        case .serial: driver = FutabaRSServoDriver(transport: SerialPort(path: serialPath))
-        case .tcp: driver = FutabaRSServoDriver(transport: TCPServoTransport(host: bridgeHost, port: UInt16(clamping: bridgePort)))
+        do {
+            switch servoKind {
+            case .mock: driver = MockServoDriver()
+            case .serial: driver = FutabaRSServoDriver(transport: try ServoTransports.make(serialPath))
+            case .tcp: driver = FutabaRSServoDriver(transport: TCPServoTransport(host: bridgeHost, port: UInt16(clamping: bridgePort)))
+            }
+        } catch {
+            servoPhase = .disconnected
+            fail(error)
+            return
         }
         do {
             try await driver.open()

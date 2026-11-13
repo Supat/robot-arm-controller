@@ -13,8 +13,15 @@ public struct SerialPortInfo: Identifiable, Hashable, Sendable {
     public var name: String
     public var id: String { path }
 
-    /// Serial ports present right now, USB adapters first.
+    /// Serial ports present right now, USB adapters first. Direct-USB FTDI adapters that macOS
+    /// has no driver for (the Futaba RSC-U485) are listed too, with a `usb://` path.
     public static func available() -> [SerialPortInfo] {
+        let direct = FTDIDeviceInfo.available().map { SerialPortInfo(path: $0.spec, name: $0.displayName) }
+        return direct + serialDevices()
+    }
+
+    /// Serial devices with a `/dev/cu.*` node.
+    static func serialDevices() -> [SerialPortInfo] {
         var ports: [SerialPortInfo] = []
         #if canImport(IOKit)
         guard let matching = IOServiceMatching(kIOSerialBSDServiceValue) else { return fallback() }

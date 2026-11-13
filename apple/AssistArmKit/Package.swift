@@ -28,7 +28,8 @@ let package = Package(
             resources: [.copy("Resources/parameters")]
         ),
         // Futaba RS-series command servos over a serial port (or a TCP serial bridge).
-        .target(name: "FutabaRS", dependencies: ["AssistArmCore"]),
+        .target(name: "FutabaRS", dependencies: ["AssistArmCore"],
+                linkerSettings: [.linkedFramework("IOUSBHost", .when(platforms: [.macOS]))]),
         // EMG from the Delsys Trigno SDK server via TrignoKit.
         .target(name: "TrignoEMG", dependencies: ["AssistArmCore", .product(name: "TrignoKit", package: "TrignoKit")]),
         // EMG from a Lab Streaming Layer inlet (e.g. the Trigno app's "Delsys" stream).

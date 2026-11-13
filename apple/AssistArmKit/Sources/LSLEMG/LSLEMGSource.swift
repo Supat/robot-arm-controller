@@ -38,7 +38,7 @@ public final class LSLEMGSource: EMGSource, @unchecked Sendable {
     public var name: String { "LSL \"\(streamName)\"" }
     public var resolveTimeout: Double = 5
 
-    private var inlet: lsl_inlet?
+    private var inlet: InletBox?
     private var thread: Thread?
     private let stopFlag = NSLock()
     private var stopping = false
@@ -87,10 +87,11 @@ public final class LSLEMGSource: EMGSource, @unchecked Sendable {
         let rate = lsl_get_nominal_srate(info)
         if rate > 0 { sampleRate = rate }
 
-        guard let inlet = lsl_create_inlet(info, 360, LSL_NO_PREFERENCE, 1) else { throw LSLError.openFailed(-1) }
+        guard let raw = lsl_create_inlet(info, 360, LSL_NO_PREFERENCE, 1) else { throw LSLError.openFailed(-1) }
         var code: Int32 = 0
-        lsl_open_stream(inlet, resolveTimeout, &code)
-        guard code == 0 else { lsl_destroy_inlet(inlet); throw LSLError.openFailed(code) }
+        lsl_open_stream(raw, resolveTimeout, &code)
+        guard code == 0 else { lsl_destroy_inlet(raw); throw LSLError.openFailed(code) }
+        let inlet = InletBox(raw)
         self.inlet = inlet
         stopFlag.withLock { stopping = false }
 
@@ -104,7 +105,7 @@ public final class LSLEMGSource: EMGSource, @unchecked Sendable {
                 var ec: Int32 = 0
                 let elements = data.withUnsafeMutableBufferPointer { d in
                     stamps.withUnsafeMutableBufferPointer { t in
-                        lsl_pull_chunk_f(inlet, d.baseAddress, t.baseAddress, UInt(d.count), UInt(t.count), 0.1, &ec)
+                        lsl_pull_chunk_f(inlet.raw, d.baseAddress, t.baseAddress, UInt(d.count), UInt(t.count), 0.1, &ec)
                     }
                 }
                 guard ec == 0 else { break }
@@ -130,6 +131,12 @@ public final class LSLEMGSource: EMGSource, @unchecked Sendable {
         stopFlag.withLock { stopping = true }
         while let t = thread, !t.isFinished { try? await Task.sleep(for: .milliseconds(10)) }
         thread = nil
-        if let inlet { lsl_destroy_inlet(inlet); self.inlet = nil }
+        if let inlet { lsl_destroy_inlet(inlet.raw); self.inlet = nil }
     }
+}
+
+/// liblsl handles are plain pointers owned by this source; the box lets the reader thread hold one.
+private final class InletBox: @unchecked Sendable {
+    let raw: lsl_inlet
+    init(_ raw: lsl_inlet) { self.raw = raw }
 }

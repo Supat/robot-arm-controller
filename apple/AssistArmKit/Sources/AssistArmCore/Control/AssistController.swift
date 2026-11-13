@@ -13,17 +13,44 @@ public struct ControlConfiguration: Codable, Sendable, Equatable {
     public var unitsPerDegree: Double = 10
     /// Joint angle clamp either side of zero, degrees (legacy ±90).
     public var angleLimitDegrees: Double = 90
-    /// How often servo goals are updated.
+    /// Control loop rate: EMG processing, model evaluation and compliance updates.
     public var updateRate: Double = 50
+    /// How often a goal position is written to the servos. Futaba RS servos restart their motion
+    /// on every goal command, so writing at the loop rate (50 Hz) makes them crawl at a fraction of
+    /// full speed; on the bench 20 Hz tracked a sweeping goal with ~0.2 s lag and 10 Hz was similar.
+    public var goalUpdateRate: Double = 20
     /// How often servo status (angle, current) is read back for display and logging.
     public var statusPollRate: Double = 5
     /// Legacy set 75 % at zeroing.
     public var maxTorquePercent: UInt8 = 75
-    /// Travel time per goal, 10 ms units (0 = fastest).
+    /// Travel time per goal, 10 ms units (0 = fastest). Non-zero values made tracking worse on the bench.
     public var moveTime: UInt16 = 0
     public var stiffness = StiffnessPolicy()
 
     public init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case leftServoID, rightServoID, mirrorRight, zeroLeft, zeroRight, unitsPerDegree, angleLimitDegrees
+        case updateRate, goalUpdateRate, statusPollRate, maxTorquePercent, moveTime, stiffness
+    }
+
+    /// Tolerates settings saved by older builds that lack newer keys.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        leftServoID = try c.decodeIfPresent(UInt8.self, forKey: .leftServoID) ?? leftServoID
+        rightServoID = try c.decodeIfPresent(UInt8.self, forKey: .rightServoID) ?? rightServoID
+        mirrorRight = try c.decodeIfPresent(Bool.self, forKey: .mirrorRight) ?? mirrorRight
+        zeroLeft = try c.decodeIfPresent(Int16.self, forKey: .zeroLeft) ?? zeroLeft
+        zeroRight = try c.decodeIfPresent(Int16.self, forKey: .zeroRight) ?? zeroRight
+        unitsPerDegree = try c.decodeIfPresent(Double.self, forKey: .unitsPerDegree) ?? unitsPerDegree
+        angleLimitDegrees = try c.decodeIfPresent(Double.self, forKey: .angleLimitDegrees) ?? angleLimitDegrees
+        updateRate = try c.decodeIfPresent(Double.self, forKey: .updateRate) ?? updateRate
+        goalUpdateRate = try c.decodeIfPresent(Double.self, forKey: .goalUpdateRate) ?? goalUpdateRate
+        statusPollRate = try c.decodeIfPresent(Double.self, forKey: .statusPollRate) ?? statusPollRate
+        maxTorquePercent = try c.decodeIfPresent(UInt8.self, forKey: .maxTorquePercent) ?? maxTorquePercent
+        moveTime = try c.decodeIfPresent(UInt16.self, forKey: .moveTime) ?? moveTime
+        stiffness = try c.decodeIfPresent(StiffnessPolicy.self, forKey: .stiffness) ?? stiffness
+    }
 }
 
 /// One tick of the control loop, for plots and the CSV log.
@@ -77,7 +104,7 @@ public actor AssistController {
 
     public init(pipeline: QuasiTensionPipeline, servo: ServoDriver, estimator: JointEstimator,
                 range: ActivationRange, configuration: ControlConfiguration = ControlConfiguration()) async throws {
-        let channels = await pipeline.channelCount
+        let channels = pipeline.channelCount
         guard channels == estimator.channelCount else {
             throw ControllerError.channelMismatch(source: channels, model: estimator.channelCount)
         }
@@ -136,6 +163,7 @@ public actor AssistController {
         let started = ContinuousClock.now
         var tick = 0
         var lastStatusPoll = -Double.infinity
+        var lastGoalWrite = -Double.infinity
         while !Task.isCancelled && isRunning {
             let c = configuration
             let period = 1 / max(1, c.updateRate)
@@ -144,7 +172,9 @@ public actor AssistController {
                 do {
                     let pollStatus = now - lastStatusPoll >= 1 / max(0.1, c.statusPollRate)
                     if pollStatus { lastStatusPoll = now }
-                    let out = try await step(sample, time: now, pollStatus: pollStatus)
+                    let writeGoal = now - lastGoalWrite >= 1 / max(0.1, c.goalUpdateRate) - period / 2
+                    if writeGoal { lastGoalWrite = now }
+                    let out = try await step(sample, time: now, writeGoal: writeGoal, pollStatus: pollStatus)
                     for sink in sampleSinks { sink(out) }
                 } catch {
                     for sink in errorSinks { sink(error) }
@@ -157,7 +187,7 @@ public actor AssistController {
         }
     }
 
-    private func step(_ sample: QuasiTensionSample, time: Double, pollStatus: Bool) async throws -> ControlSample {
+    private func step(_ sample: QuasiTensionSample, time: Double, writeGoal: Bool, pollStatus: Bool) async throws -> ControlSample {
         let c = configuration
         let activation = range.normalize(sample.values)
         let estimate = estimator.estimate(activation)
@@ -174,8 +204,10 @@ public actor AssistController {
         let units = Int(( degrees * c.unitsPerDegree).rounded())
         let left = Int16(clamping: units + Int(c.zeroLeft))
         let right = Int16(clamping: (c.mirrorRight ? -units : units) + Int(c.zeroRight))
-        try await servo.move(id: c.leftServoID, position: left, time: c.moveTime)
-        try await servo.move(id: c.rightServoID, position: right, time: c.moveTime)
+        if writeGoal {
+            try await servo.move(id: c.leftServoID, position: left, time: c.moveTime)
+            try await servo.move(id: c.rightServoID, position: right, time: c.moveTime)
+        }
 
         if pollStatus {
             statusLeft = try await servo.readStatus(id: c.leftServoID)

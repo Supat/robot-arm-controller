@@ -243,6 +243,9 @@ struct ControlPanel: View {
                 LabeledContent("Update rate (Hz)") {
                     TextField("", value: $model.configuration.updateRate, format: .number).labelsHidden().frame(width: 60)
                 }
+                LabeledContent("Goal write rate (Hz)") {
+                    TextField("", value: $model.configuration.goalUpdateRate, format: .number).labelsHidden().frame(width: 60)
+                }
                 LabeledContent("Max torque (%)") {
                     TextField("", value: $model.configuration.maxTorquePercent, format: .number).labelsHidden().frame(width: 60)
                 }

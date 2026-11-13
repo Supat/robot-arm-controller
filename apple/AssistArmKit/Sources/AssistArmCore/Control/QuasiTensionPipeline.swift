@@ -58,7 +58,7 @@ public actor ActivationCalibrator {
 
     public init(pipeline: QuasiTensionPipeline) async {
         self.pipeline = pipeline
-        calibration = MinMaxCalibration(channelCount: await pipeline.channelCount, sampleRate: pipeline.outputRate)
+        calibration = MinMaxCalibration(channelCount: pipeline.channelCount, sampleRate: pipeline.outputRate)
         await pipeline.addQuasiTensionSink { [weak self] sample in
             guard let self else { return }
             Task { await self.add(sample) }
@@ -71,7 +71,7 @@ public actor ActivationCalibrator {
     }
 
     public func start() async throws {
-        calibration = MinMaxCalibration(channelCount: await pipeline.channelCount, sampleRate: pipeline.outputRate)
+        calibration = MinMaxCalibration(channelCount: pipeline.channelCount, sampleRate: pipeline.outputRate)
         isRunning = true
         try await pipeline.start()
     }

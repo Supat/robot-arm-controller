@@ -12,7 +12,7 @@ apple/
   AssistArmKit/        Swift package
     AssistArmCore      Koike filter, quasi-tension, min/max calibration, musculoskeletal model,
                        stiffness policy, control loop, telemetry CSV, synthetic EMG, simulated servos
-    FutabaRS           Futaba RS packet codec, POSIX serial port, TCP serial bridge, servo driver
+    FutabaRS           Futaba RS packet codec, POSIX serial port, direct-USB FTDI transport, TCP serial bridge, servo driver
     TrignoEMG          EMG source on TrignoKit (Delsys Trigno SDK server over TCP)
     LSLEMG             EMG source on a Lab Streaming Layer inlet (liblsl via TrignoKit's CLSL)
     assist-arm         headless CLI for bench tests
@@ -63,10 +63,14 @@ Package only (no UI), tests, and the CLI:
 ```bash
 cd apple/AssistArmKit
 swift build && swift test
-swift run assist-arm ports                                   # list serial ports
-swift run assist-arm servo --port /dev/cu.usbserial-XXXX     # read status, zero servos 1 and 2
+swift run assist-arm ports                                   # list serial ports and direct-USB adapters
+swift run assist-arm status --port usb://1115:0008            # read servo status only (no motion)
+swift run assist-arm bench --port usb://1115:0008             # move-then-read timing matrix (no motion)
+swift run assist-arm inspect --port usb://1115:0008 --id 1    # ROM/RAM dump around ±20° test moves
+swift run assist-arm track --port usb://1115:0008 --ids 1,2 --sine 1 --repeat 50   # goal tracking test
+swift run assist-arm servo --port usb://1115:0008             # read status, zero servos 1 and 2
 swift run assist-arm run --calibrate 8 --duration 20          # synthetic EMG + simulated servos
-swift run assist-arm run --source trigno --host 192.168.1.50 --slots 1,2 --servo /dev/cu.usbserial-XXXX --mode highOrLow --threshold 40 --log run.csv
+swift run assist-arm run --source trigno --host 192.168.1.50 --slots 1,2 --servo usb://1115:0008 --mode highOrLow --threshold 40 --log run.csv
 swift run assist-arm run --source lsl --stream Delsys --columns 0,1 --servo mock
 ```
 
@@ -85,24 +89,35 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
 1. **EMG**: choose Trigno SDK (IP of the PC running the Trigno Control Utility, sensor slots for
    flexor and extensor), LSL inlet (stream name and columns; the Trigno app's "Delsys" stream
    uses column n = slot n+1), or Synthetic. Connect.
-2. **Servos**: pick the USB serial adapter (Futaba RS485 adapter shows up as `/dev/cu.usbserial-…`),
-   or a TCP bridge, or Simulated. "Connect & zero" turns torque on, drives both servos to 0°,
+2. **Servos**: pick the adapter. The Futaba RSC-U485 appears as "USB <-> Serial Cable (direct USB)";
+   a generic FTDI/CP210x adapter appears as `/dev/cu.usbserial-…`. Or use a TCP bridge, or Simulated. "Connect & zero" turns torque on, drives both servos to 0°,
    reads the resting angles as zero offsets, sets max torque 75 % and turns torque off, exactly
    like the legacy Init Servo button.
 3. **Calibrate**: relax, then contract each muscle fully, then stop. The range is saved.
 4. **Mode** and threshold, then **Start**. Telemetry goes to
-   `~/Documents/AssistArm/Recordings/assist-<timestamp>.csv` (or the sandbox container's
-   Documents when sandboxed).
+   `~/Documents/AssistArm/Recordings/assist-<timestamp>.csv`.
 
 ## Hardware notes to verify on the bench
 
-- The Futaba return packet with flag 0x09 is parsed as memory map 42–59 (position, time, speed,
-  current, temperature, voltage), matching the legacy offsets. Echo from half-duplex RS-485
-  adapters is skipped.
+- The Futaba return packet (header `FD DF`, flag 0x09) is parsed as memory map 42–59 (position,
+  time, speed, current, temperature, voltage), matching the legacy offsets. Echo from half-duplex
+  RS-485 adapters is skipped. `assist-arm status` prints the raw 18 bytes for checking the field
+  layout of a particular servo model.
+- Futaba RS servos restart their motion on every goal command. Writing goals at the 50 Hz loop
+  rate makes them crawl at a fraction of full speed, so goals are written at `goalUpdateRate`
+  (20 Hz by default, "Goal write rate" under Advanced); 10–20 Hz tracked a sweeping goal with
+  about 0.2 s lag on the bench. `assist-arm track` reproduces the measurement.
+- Compliance slope is in degrees: 0xFF means torque ramps over 255° (very soft), 0x32 over 50°.
+  Under load the servo settles several degrees short of its goal at 0x32; that is the legacy
+  "stiff" setting, not a fault.
 - Each goal and compliance change is a short packet per servo. The legacy long packets used a
   length field that did not match the record size, so they were not carried over.
-- The sandbox entitlement `com.apple.security.device.serial` is set; if the adapter still cannot
-  be opened, disable the sandbox in `project.yml` for lab use.
+- The Futaba RSC-U485 is an FTDI FT232R with Futaba's own USB IDs (vendor 0x1115, product
+  0x0008), so macOS never attaches a serial driver and no `/dev/cu.*` node appears. `FTDIUSBTransport`
+  drives it directly through `IOUSBHost` (FTDI vendor requests for 115200 8N1, 1 ms latency timer,
+  bulk endpoints 0x81/0x02 with the two status bytes stripped from each packet). No driver install,
+  no kernel extension, no sandbox entitlement; the app is not sandboxed. The adapter must be free
+  (close any other program using it) and the servos need their own power supply to answer.
 
 ## iPad
 

@@ -14,14 +14,18 @@ public struct ServoStatus: Sendable, Equatable {
     public var temperature: Int16
     /// 10 mV units.
     public var voltage: Int16
+    /// The 18 raw bytes of memory map 42–59 as received, for bench diagnostics (empty for mocks).
+    public var raw: [UInt8]
 
-    public init(position: Int16, elapsedTime: Int16 = 0, speed: Int16 = 0, current: Int16 = 0, temperature: Int16 = 0, voltage: Int16 = 0) {
+    public init(position: Int16, elapsedTime: Int16 = 0, speed: Int16 = 0, current: Int16 = 0, temperature: Int16 = 0, voltage: Int16 = 0,
+                raw: [UInt8] = []) {
         self.position = position
         self.elapsedTime = elapsedTime
         self.speed = speed
         self.current = current
         self.temperature = temperature
         self.voltage = voltage
+        self.raw = raw
     }
 
     public var positionDegrees: Double { Double(position) / 10 }
