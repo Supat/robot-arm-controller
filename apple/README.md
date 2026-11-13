@@ -41,9 +41,10 @@ apple/
 ## Build
 
 Requires Xcode 16+ (the SwiftUI macros are not in the Command Line Tools) and the
-`delsys-app` checkout next to this repository (`../delsys-app/apple/TrignoKit`; override with
-`ASSISTARM_TRIGNOKIT_PATH`). `delsys-app` must export the `CLSL` product (added in its
-`Package.swift`).
+`delsys-app` submodule (`git submodule update --init`), which provides TrignoKit at
+`external/delsys-app/apple/TrignoKit`. Set `ASSISTARM_TRIGNOKIT_PATH` to build against a
+different checkout. To move to a newer delsys-app, `cd external/delsys-app && git pull`, then
+commit the submodule pointer here.
 
 ```bash
 brew install xcodegen
@@ -72,7 +73,7 @@ swift run assist-arm run --source lsl --stream Delsys --columns 0,1 --servo mock
 Without hardware, the Python mock TCU from `delsys-app` stands in for the Trigno server:
 
 ```bash
-(cd ../delsys-app && python -m trigno mock-server --sensors 2)
+(cd ../../external/delsys-app && python -m trigno mock-server --sensors 2)
 swift run assist-arm run --source trigno --host 127.0.0.1
 ```
 

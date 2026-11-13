@@ -6,10 +6,16 @@ joint stiffness, and two Futaba RS servos mirror that angle with a compliance th
 the stiffness.
 
 ```
-apple/        macOS app (SwiftUI) + Swift package AssistArmKit — the current implementation
-legacy/       Windows/VS2019 originals (Assist_Demo, NI-DAQ + GLUT); git-ignored, kept for reference
+apple/               macOS app (SwiftUI) + Swift package AssistArmKit — the current implementation
+external/delsys-app  git submodule: Delsys Trigno SDK client (TrignoKit Swift package, Python mock server)
+legacy/              Windows/VS2019 originals (Assist_Demo, NI-DAQ + GLUT); git-ignored, kept for reference
 ```
 
-The EMG now comes from a Delsys Trigno system through the Trigno SDK server, using the
-`TrignoKit` package from the sibling repository `delsys-app` (expected at
-`../delsys-app`). See [`apple/README.md`](apple/README.md).
+```bash
+git clone --recurse-submodules git@github.com:Supat/robot-arm-controller.git
+# or, in an existing clone:
+git submodule update --init
+```
+
+The EMG comes from a Delsys Trigno system through the Trigno SDK server, using the
+`TrignoKit` package from the `delsys-app` submodule. See [`apple/README.md`](apple/README.md).

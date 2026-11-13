@@ -1,0 +1,3 @@
+[submodule "external/delsys-app"]
+	path = external/delsys-app
+	url = git@github.com:Supat/delsys-app.git

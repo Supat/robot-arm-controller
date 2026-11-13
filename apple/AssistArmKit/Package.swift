@@ -1,12 +1,12 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// TrignoKit (Delsys Trigno SDK client) lives in the sibling delsys-app checkout:
-//   GitHub/delsys-app/apple/TrignoKit
-// Override with ASSISTARM_TRIGNOKIT_PATH if your checkout is elsewhere.
+// TrignoKit (Delsys Trigno SDK client) comes from the delsys-app git submodule at
+// external/delsys-app (clone with --recurse-submodules or run `git submodule update --init`).
+// Override with ASSISTARM_TRIGNOKIT_PATH to build against another checkout.
 import Foundation
 let trignoKitPath = ProcessInfo.processInfo.environment["ASSISTARM_TRIGNOKIT_PATH"]
-    ?? "../../../delsys-app/apple/TrignoKit"
+    ?? "../../external/delsys-app/apple/TrignoKit"
 
 let package = Package(
     name: "AssistArmKit",
