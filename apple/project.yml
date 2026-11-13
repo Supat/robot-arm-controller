@@ -1,0 +1,51 @@
+name: AssistArm
+options:
+  bundleIdPrefix: com.supatsaetia
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+packages:
+  AssistArmKit:
+    path: AssistArmKit
+
+settings:
+  base:
+    # Your Apple Developer team ID (Xcode › Settings › Accounts); empty = sign to run locally.
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  AssistArm:
+    type: application
+    platform: macOS
+    sources:
+      - path: AssistArmApp
+        excludes: [AssistArm.entitlements]
+    dependencies:
+      - package: AssistArmKit
+        product: AssistArmCore
+      - package: AssistArmKit
+        product: FutabaRS
+      - package: AssistArmKit
+        product: TrignoEMG
+      - package: AssistArmKit
+        product: LSLEMG
+    entitlements:
+      path: AssistArmApp/AssistArm.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.supatsaetia.assistarm
+        PRODUCT_NAME: AssistArm
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Assist Arm
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.medical
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        ENABLE_HARDENED_RUNTIME: YES
+        # Embedded frameworks (liblsl) live in Contents/Frameworks.
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+    scheme:
+      testTargets: []

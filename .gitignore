@@ -1,0 +1,12 @@
+# Archived Windows/VS2019 EMG assist demo (8.9 GB of build cache). Kept locally only.
+legacy/
+
+# macOS
+.DS_Store
+
+# Swift / Xcode
+.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.swiftpm/
