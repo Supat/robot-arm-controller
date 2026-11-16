@@ -28,7 +28,8 @@ public enum Futaba {
     public enum Flag {
         /// Write to RAM, no return packet.
         public static let write: UInt8 = 0x00
-        /// Return packet with memory map 42–59 (position, time, speed, current, temperature, voltage).
+        /// Return packet with memory map 42–59 (position, time, speed, current, then temperature
+        /// and voltage, or voltage alone, depending on the model; see `Packet.status()`).
         public static let returnStatus: UInt8 = 0x09
         /// Return an ACK packet.
         public static let returnAck: UInt8 = 0x01
@@ -88,19 +89,30 @@ public enum Futaba {
         public var count: UInt8
         public var data: [UInt8]
 
+        /// Above any real servo temperature (°C) and below any real supply voltage (10 mV units).
+        static let maxPlausibleTemperature: Int16 = 200
+
         /// Total byte count of a packet whose first 7 bytes are `head`.
         public static func totalLength(head: ArraySlice<UInt8>) -> Int {
             7 + Int(head[head.startIndex + 5]) * Int(head[head.startIndex + 6]) + 1
         }
 
         /// Decode the status block (memory map 42–59).
+        ///
+        /// Models differ after the current field. Some report temperature at 50–51 and voltage
+        /// at 52–53. Others (the bench servos answer `… B4 03 00 00 …`, 9.48 V) have no
+        /// temperature and report voltage at 50–51 with 52–53 left zero. A powered servo never
+        /// reads 0 V, and no servo runs at hundreds of °C, so the two are told apart by value.
         public func status() throws -> ServoStatus {
             guard address == Address.presentPosition, data.count >= 12 else {
                 throw ServoError.badPacket("expected 18 bytes from address 42, got \(data.count) from \(address)")
             }
             func i16(_ offset: Int) -> Int16 { Int16(bitPattern: UInt16(data[offset]) | UInt16(data[offset + 1]) << 8) }
-            return ServoStatus(position: i16(0), elapsedTime: i16(2), speed: i16(4),
-                               current: i16(6), temperature: i16(8), voltage: i16(10), raw: data)
+            let word50 = i16(8), word52 = i16(10)
+            let voltageOnly = word52 == 0 && word50 > Self.maxPlausibleTemperature
+            return ServoStatus(position: i16(0), elapsedTime: i16(2), speed: i16(4), current: i16(6),
+                               temperature: voltageOnly ? nil : word50,
+                               voltage: voltageOnly ? word50 : word52, raw: data)
         }
     }
 

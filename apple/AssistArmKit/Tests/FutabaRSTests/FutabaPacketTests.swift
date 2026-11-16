@@ -46,9 +46,18 @@ final class FutabaPacketTests: XCTestCase {
         XCTAssertEqual(packets[0].length, 0)           // echo
         XCTAssertEqual(packets[1].address, 42)
         let s = try packets[1].status()
-        XCTAssertEqual(s, ServoStatus(position: 900, elapsedTime: 5, speed: -10, current: 120, temperature: 33, voltage: 740))
+        XCTAssertEqual(s, ServoStatus(position: 900, elapsedTime: 5, speed: -10, current: 120, temperature: 33, voltage: 740, raw: data))
         XCTAssertEqual(s.positionDegrees, 90, accuracy: 1e-12)
         XCTAssertEqual(s.volts, 7.4, accuracy: 1e-12)
+
+        // Models without a temperature sensor report voltage at 50–51 and leave 52–53 zero
+        // (bytes as read from the bench servos: 63.3°, 13 mA, 9.48 V).
+        let bench: [UInt8] = [0x79, 0x02, 0, 0, 0, 0, 0x0D, 0, 0xB4, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]
+        let b = try Futaba.Packet(id: 1, flag: 0, address: 42, length: 18, count: 1, data: bench).status()
+        XCTAssertEqual(b.position, 633)
+        XCTAssertEqual(b.current, 13)
+        XCTAssertNil(b.temperature)
+        XCTAssertEqual(b.volts, 9.48, accuracy: 1e-12)
 
         // Incomplete packet: nothing yet.
         XCTAssertNil(Futaba.parse(Array(ret.dropLast(3))))

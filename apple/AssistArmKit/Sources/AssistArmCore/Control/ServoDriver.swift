@@ -10,14 +10,14 @@ public struct ServoStatus: Sendable, Equatable {
     public var speed: Int16
     /// Present load (current), mA.
     public var current: Int16
-    /// °C.
-    public var temperature: Int16
+    /// °C, or nil when the servo model does not report a temperature.
+    public var temperature: Int16?
     /// 10 mV units.
     public var voltage: Int16
     /// The 18 raw bytes of memory map 42–59 as received, for bench diagnostics (empty for mocks).
     public var raw: [UInt8]
 
-    public init(position: Int16, elapsedTime: Int16 = 0, speed: Int16 = 0, current: Int16 = 0, temperature: Int16 = 0, voltage: Int16 = 0,
+    public init(position: Int16, elapsedTime: Int16 = 0, speed: Int16 = 0, current: Int16 = 0, temperature: Int16? = nil, voltage: Int16 = 0,
                 raw: [UInt8] = []) {
         self.position = position
         self.elapsedTime = elapsedTime

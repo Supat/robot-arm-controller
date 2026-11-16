@@ -104,7 +104,7 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
 ## Hardware notes to verify on the bench
 
 - The Futaba return packet (header `FD DF`, flag 0x09) is parsed as memory map 42–59 (position,
-  time, speed, current, temperature, voltage), matching the legacy offsets. Echo from half-duplex
+  time, speed, current, then temperature and voltage; models without a temperature sensor report voltage alone at 50–51, which the parser detects by value). Echo from half-duplex
   RS-485 adapters is skipped. `assist-arm status` prints the raw 18 bytes for checking the field
   layout of a particular servo model.
 - Futaba RS servos restart their motion on every goal command. Writing goals at the 50 Hz loop

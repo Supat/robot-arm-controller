@@ -185,7 +185,8 @@ struct ControlPanel: View {
             Text("Servos")
         } footer: {
             if let z = model.zero {
-                Text(String(format: "Zero: L %.1f°, R %.1f° · %.1f V · %d °C", z.left.positionDegrees, z.right.positionDegrees, z.left.volts, z.left.temperature))
+                Text(String(format: "Zero: L %.1f°, R %.1f° · %.1f V", z.left.positionDegrees, z.right.positionDegrees, z.left.volts)
+                     + (z.left.temperature.map { " · \($0) °C" } ?? ""))
             } else {
                 Text("Futaba RS servos at 115200 bps. Connect drives both to 0° and records the resting angles.")
             }

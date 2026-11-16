@@ -82,7 +82,8 @@ func cmdPorts() {
 func printStatus(_ servo: ServoDriver, _ config: ControlConfiguration) async throws {
     for id in [config.leftServoID, config.rightServoID] {
         let s = try await servo.readStatus(id: id)
-        log(String(format: "servo %d: %.1f°  %d mA  %d °C  %.1f V", id, s.positionDegrees, s.current, s.temperature, s.volts))
+        let temperature = s.temperature.map { "  \($0) °C" } ?? ""
+        log(String(format: "servo %d: %.1f°  %d mA  %.1f V", id, s.positionDegrees, s.current, s.volts) + temperature)
         if !s.raw.isEmpty { log("  raw 42–59: " + s.raw.map { String(format: "%02X", $0) }.joined(separator: " ")) }
     }
 }
