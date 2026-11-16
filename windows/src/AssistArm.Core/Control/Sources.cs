@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using AssistArm.Signal;
 
 namespace AssistArm.Control;
@@ -17,15 +18,31 @@ public interface IEmgSource
 /// <summary>Waits that are accurate to well under a millisecond, which Task.Delay is not on Windows.</summary>
 public static class PrecisionClock
 {
+    [DllImport("winmm.dll")]
+    private static extern uint timeBeginPeriod(uint milliseconds);
+
+    // Windows timers tick every 15.6 ms unless the process asks for better, which quantizes
+    // Thread.Sleep(1) — and with it every loop here — to ~64 Hz. Request 1 ms once, for the
+    // life of the process, so a CLI or test host is as accurate as the app.
+    private static readonly bool FineTimer = RequestFineTimer();
+
+    private static bool RequestFineTimer()
+    {
+        if (!OperatingSystem.IsWindows()) return true; // 1 ms sleeps already
+        try { return timeBeginPeriod(1) == 0; }
+        catch (Exception) { return false; }
+    }
+
     /// <summary>Block until <paramref name="stopwatch"/> reaches <paramref name="dueSeconds"/>.</summary>
     public static void SleepUntil(Stopwatch stopwatch, double dueSeconds, CancellationToken cancel = default)
     {
+        // Sleep(1) can overshoot by a timer tick, so only sleep while there is room for that.
+        double sleepMargin = FineTimer ? 0.003 : 0.017;
         while (!cancel.IsCancellationRequested)
         {
             double remaining = dueSeconds - stopwatch.Elapsed.TotalSeconds;
             if (remaining <= 0) return;
-            // Sleep(1) can overshoot by a timer tick, so only sleep while there is room for that.
-            if (remaining > 0.003) Thread.Sleep(1);
+            if (remaining > sleepMargin) Thread.Sleep(1);
             else Thread.SpinWait(50);
         }
     }
