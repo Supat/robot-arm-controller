@@ -42,22 +42,35 @@ public final class TrignoEMGSource: EMGSource, @unchecked Sendable {
         // "CONNECTION NOT MASTER" without streaming. A connection left over from a dropped
         // link keeps the role, so claim it on every start.
         _ = try await session.client.send("MASTER")
+        // Open the data ports without letting the session send START: it allows 20 s and leaves
+        // the ports open when START fails. The base usually answers in 2 s but has been seen
+        // to take over a minute, so START is sent here with a longer wait.
         try await startSession(columns: columns, rate: rate, sink)
         guard !waitForTrigger else { return }
-        // START can be refused with a reply the session does not treat as an error, so make
-        // sure samples really arrive.
-        let deadline = ContinuousClock.now + .seconds(3)
-        while await !session.hasData() {
-            if ContinuousClock.now >= deadline {
-                await session.stop()
-                throw TrignoEMGError.noData
+        do {
+            var reply = try await session.client.send("START", timeout: Self.startTimeout)
+            if reply == TrignoProtocol.replyCannot {
+                // The base is still running, e.g. after a client went away without STOP.
+                _ = try await session.client.send("STOP", timeout: .seconds(20))
+                reply = try await session.client.send("START", timeout: Self.startTimeout)
             }
-            try await Task.sleep(for: .milliseconds(50))
+            guard reply == "OK" else { throw TrignoError.rejected(command: "START", reply: reply) }
+            // Make sure samples really arrive.
+            let deadline = ContinuousClock.now + .seconds(3)
+            while await !session.hasData() {
+                if ContinuousClock.now >= deadline { throw TrignoEMGError.noData }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+        } catch {
+            await session.stop()        // closes the data ports
+            throw error
         }
     }
 
+    static let startTimeout: Duration = .seconds(120)
+
     private func startSession(columns: [Int], rate: Double, _ sink: @escaping @Sendable (EMGBlock) -> Void) async throws {
-        try await session.start(waitForTrigger: waitForTrigger) { block in
+        try await session.start(waitForTrigger: true) { block in
             guard block.port == .emg else { return }
             let rows = block.rowCount
             var samples = [Float](repeating: 0, count: rows * columns.count)
