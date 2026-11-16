@@ -26,7 +26,52 @@ final class ScriptedEMGSource: EMGSource, @unchecked Sendable {
     func stop() async { task?.cancel(); task = nil }
 }
 
+/// Emits a ramp in many small blocks as one synchronous burst, the way a network source
+/// delivers buffered data after a stall.
+final class BurstEMGSource: EMGSource, @unchecked Sendable {
+    let name = "burst"
+    let channelCount = 1
+    let sampleRate = 2000.0
+    let blocks: [EMGBlock]
+    init(blockCount: Int, rowsPerBlock: Int) {
+        var out: [EMGBlock] = []
+        var index = 0
+        for _ in 0..<blockCount {
+            let rows = (0..<rowsPerBlock).map { Float(index + $0) * (($0 % 2 == 0) ? 1 : -1) }
+            out.append(EMGBlock(sampleRate: 2000, channelCount: 1, samples: rows, startIndex: index))
+            index += rowsPerBlock
+        }
+        blocks = out
+    }
+    func start(_ sink: @escaping @Sendable (EMGBlock) -> Void) async throws {
+        let blocks = self.blocks
+        Thread.detachNewThread { for b in blocks { sink(b) } }
+    }
+    func stop() async {}
+}
+
 final class ControllerTests: XCTestCase {
+    func testBurstOfBlocksIsProcessedInArrivalOrder() async throws {
+        let source = BurstEMGSource(blockCount: 400, rowsPerBlock: 5)
+        var reference = QuasiTensionProcessor(inputRate: 2000, channelCount: 1)
+        let expected = source.blocks.flatMap { reference.process($0) }.map { $0.values[0] }
+
+        let pipeline = QuasiTensionPipeline(source: source)
+        let collector = Collector()
+        await pipeline.addQuasiTensionSink { sample in collector.append(sample) }
+        try await pipeline.start()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while collector.count < expected.count, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await pipeline.stop()
+
+        let got = collector.snapshot()
+        XCTAssertEqual(got.count, expected.count)
+        XCTAssertEqual(got.map(\.index), Array(0..<expected.count))
+        for (g, e) in zip(got, expected) { XCTAssertEqual(g.values[0], e, accuracy: 1e-12) }
+    }
+
     func testCalibrationThenControlDrivesMockServos() async throws {
         let source = ScriptedEMGSource(amplitudes: [1, 0])
         let pipeline = QuasiTensionPipeline(source: source)
@@ -122,4 +167,12 @@ final class SampleBox: @unchecked Sendable {
     private let lock = NSLock()
     func append(_ s: ControlSample) { lock.withLock { items.append(s) } }
     var all: [ControlSample] { lock.withLock { items } }
+}
+
+final class Collector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var samples: [QuasiTensionSample] = []
+    func append(_ s: QuasiTensionSample) { lock.withLock { samples.append(s) } }
+    var count: Int { lock.withLock { samples.count } }
+    func snapshot() -> [QuasiTensionSample] { lock.withLock { samples } }
 }

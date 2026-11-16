@@ -13,6 +13,11 @@ public actor QuasiTensionPipeline {
     /// Outstanding `start()` calls. The source runs while at least one is held, so calibration
     /// and control can hand over without stopping and restarting the stream in between.
     private var holders = 0
+    /// Blocks are queued here by the source's thread and drained by one task, so they reach the
+    /// processor in arrival order. (A `Task` per block would not guarantee that: the rectify →
+    /// average → FIR chain is order-dependent.)
+    private var inbox: AsyncStream<EMGBlock>.Continuation?
+    private var drain: Task<Void, Never>?
 
     public init(source: EMGSource, outputRate: Double = 200) {
         self.source = source
@@ -35,16 +40,30 @@ public actor QuasiTensionPipeline {
         isRunning = true
         processor.reset()
         latest = nil
-        do {
-            try await source.start { [weak self] block in
+        let (stream, continuation) = AsyncStream.makeStream(of: EMGBlock.self, bufferingPolicy: .unbounded)
+        inbox = continuation
+        drain = Task { [weak self] in
+            for await block in stream {
                 guard let self else { return }
-                Task { await self.ingest(block) }
+                await self.ingest(block)
+            }
+        }
+        do {
+            try await source.start { block in
+                continuation.yield(block)
             }
         } catch {
             isRunning = false
             holders = 0
+            closeInbox()
             throw error
         }
+    }
+
+    private func closeInbox() {
+        inbox?.finish()
+        inbox = nil
+        drain = nil
     }
 
     /// Release one `start()`. The source stops when the last holder releases it.
@@ -54,6 +73,7 @@ public actor QuasiTensionPipeline {
         guard holders == 0, isRunning else { return }
         isRunning = false
         await source.stop()
+        closeInbox()
     }
 
     private func ingest(_ block: EMGBlock) {

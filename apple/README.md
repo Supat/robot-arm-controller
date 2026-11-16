@@ -116,6 +116,15 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
   with EMG in volts makes the servo stiff whenever either muscle is active, so the arm follows
   the equilibrium in flexion and extension alike. The alternative scales over the 0…1 activation
   cube; with the shipped parameters that is ≈ flexor activation, so extension phases stay soft.
+  This is the one stage that depends on amplifier gain: on the legacy NI amplifier (raw signal
+  around 0.1–1 V) the same formula made the servo stiff only once the flexor exceeded roughly
+  10–40 % activation and soft during pure extension, so neither setting reproduces the old demo
+  exactly. The equilibrium angle itself is gain-independent.
+- EMG blocks are queued and processed strictly in arrival order. The rectify → average → FIR
+  chain is order-dependent, and a network source delivers buffered blocks in bursts after a
+  stall, so a task per block would occasionally process them out of order.
+- The legacy loop was a 10 ms timer whose callback slept 100 ms and spent 50 ms on a status read,
+  so it really wrote goals at about 6 Hz. Set "Goal write rate" to 6 to reproduce that feel.
 - Compliance slope is in degrees: 0xFF means torque ramps over 255° (very soft), 0x32 over 50°.
   Under load the servo settles several degrees short of its goal at 0x32; that is the legacy
   "stiff" setting, not a fault.

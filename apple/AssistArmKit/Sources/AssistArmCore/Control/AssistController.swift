@@ -93,6 +93,9 @@ public actor AssistController {
     public var range: ActivationRange
     public var configuration: ControlConfiguration
 
+    /// Hard limit on commanded servo position, 0.1° units (legacy ±900).
+    public static let servoPositionLimit: Int16 = 900
+
     public private(set) var isRunning = false
     private var loop: Task<Void, Never>?
     private var sampleSinks: [@Sendable (ControlSample) -> Void] = []
@@ -127,6 +130,8 @@ public actor AssistController {
     public func update(estimator: JointEstimator) { self.estimator = estimator }
 
     private func receive(_ sample: QuasiTensionSample) {
+        // Samples arrive through separate tasks, so keep the newest by index rather than by arrival.
+        if let latest, latest.index >= sample.index { return }
         latest = sample
     }
 
@@ -202,8 +207,11 @@ public actor AssistController {
         let limit = c.angleLimitDegrees
         let degrees = min(limit, max(-limit, estimate.equilibriumDegrees))
         let units = Int(( degrees * c.unitsPerDegree).rounded())
-        let left = Int16(clamping: units + Int(c.zeroLeft))
-        let right = Int16(clamping: (c.mirrorRight ? -units : units) + Int(c.zeroRight))
+        // Legacy clamped the absolute servo position to ±900 (the servos' ±90° range) after
+        // adding the zero offset, so a non-zero offset cannot push a goal past the end stop.
+        let servoLimit = Int(Self.servoPositionLimit)
+        let left = Int16(min(servoLimit, max(-servoLimit, units + Int(c.zeroLeft))))
+        let right = Int16(min(servoLimit, max(-servoLimit, (c.mirrorRight ? -units : units) + Int(c.zeroRight))))
         if writeGoal {
             try await servo.move(id: c.leftServoID, position: left, time: c.moveTime)
             try await servo.move(id: c.rightServoID, position: right, time: c.moveTime)
