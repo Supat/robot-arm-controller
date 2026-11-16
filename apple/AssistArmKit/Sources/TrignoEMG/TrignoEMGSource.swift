@@ -38,6 +38,25 @@ public final class TrignoEMGSource: EMGSource, @unchecked Sendable {
     public func start(_ sink: @escaping @Sendable (EMGBlock) -> Void) async throws {
         let columns = self.columns
         let rate = sampleRate
+        // The server only obeys START from its master connection, and answers anything else
+        // "CONNECTION NOT MASTER" without streaming. A connection left over from a dropped
+        // link keeps the role, so claim it on every start.
+        _ = try await session.client.send("MASTER")
+        try await startSession(columns: columns, rate: rate, sink)
+        guard !waitForTrigger else { return }
+        // START can be refused with a reply the session does not treat as an error, so make
+        // sure samples really arrive.
+        let deadline = ContinuousClock.now + .seconds(3)
+        while await !session.hasData() {
+            if ContinuousClock.now >= deadline {
+                await session.stop()
+                throw TrignoEMGError.noData
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private func startSession(columns: [Int], rate: Double, _ sink: @escaping @Sendable (EMGBlock) -> Void) async throws {
         try await session.start(waitForTrigger: waitForTrigger) { block in
             guard block.port == .emg else { return }
             let rows = block.rowCount
@@ -54,5 +73,16 @@ public final class TrignoEMGSource: EMGSource, @unchecked Sendable {
 
     public func stop() async {
         await session.stop()
+    }
+}
+
+public enum TrignoEMGError: LocalizedError, Sendable {
+    case noData
+
+    public var errorDescription: String? {
+        switch self {
+        case .noData:
+            "The Trigno server accepted the connection but sent no EMG samples. Check the network link to the Trigno Control Utility, then reconnect."
+        }
     }
 }

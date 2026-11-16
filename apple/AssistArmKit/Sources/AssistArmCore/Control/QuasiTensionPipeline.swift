@@ -24,14 +24,21 @@ public actor QuasiTensionPipeline {
     public func removeAllSinks() { rawSinks.removeAll(); qtSinks.removeAll() }
 
     public func start() async throws {
+        // Claim the running state before suspending, so a second start that arrives while the
+        // source is still connecting does not start the source twice.
         guard !isRunning else { return }
+        isRunning = true
         processor.reset()
         latest = nil
-        try await source.start { [weak self] block in
-            guard let self else { return }
-            Task { await self.ingest(block) }
+        do {
+            try await source.start { [weak self] block in
+                guard let self else { return }
+                Task { await self.ingest(block) }
+            }
+        } catch {
+            isRunning = false
+            throw error
         }
-        isRunning = true
     }
 
     public func stop() async {

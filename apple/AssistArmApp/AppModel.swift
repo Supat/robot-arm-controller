@@ -87,6 +87,9 @@ final class AppModel {
     private(set) var calibrationElapsed: Double = 0
     private(set) var liveRange: ActivationRange?
     private(set) var isControlling = false
+    /// A start or stop is in flight. Starting the stream takes a while on a slow link, and a
+    /// second start during it would send the Trigno base a second START, which it rejects.
+    private(set) var isSwitching = false
     private(set) var latest: ControlSample?
     private(set) var currentRecording: URL?
     private(set) var log: [LogEntry] = []
@@ -115,8 +118,8 @@ final class AppModel {
     var isBusy: Bool { isCalibrating || isControlling }
     /// Data is flowing into the plot buffers, so the plots should redraw.
     var isStreaming: Bool { isCalibrating || isControlling }
-    var canCalibrate: Bool { emgConnected && !isControlling }
-    var canControl: Bool { emgConnected && servoConnected && range != nil && !isCalibrating }
+    var canCalibrate: Bool { emgConnected && !isControlling && !isSwitching }
+    var canControl: Bool { emgConnected && servoConnected && range != nil && !isCalibrating && !isSwitching }
 
     static var recordingsDirectory: URL {
         URL.documentsDirectory.appending(path: "AssistArm/Recordings", directoryHint: .isDirectory)
@@ -288,6 +291,8 @@ final class AppModel {
 
     func startCalibration() async {
         guard let calibrator, canCalibrate, !isCalibrating else { return }
+        isSwitching = true
+        defer { isSwitching = false }
         do {
             try await calibrator.start()
             isCalibrating = true
@@ -312,8 +317,10 @@ final class AppModel {
     func stopCalibration() async -> ActivationRange? {
         guard let calibrator, isCalibrating else { return nil }
         calibrationMonitor?.cancel()
-        let result = await calibrator.stop()
         isCalibrating = false
+        isSwitching = true
+        defer { isSwitching = false }
+        let result = await calibrator.stop()
         range = result
         liveRange = nil
         info("Calibrated: " + (0..<result.channelCount).map { String(format: "ch%d %.3g…%.3g", $0 + 1, result.minimum[$0], result.maximum[$0]) }.joined(separator: ", "))
@@ -328,6 +335,8 @@ final class AppModel {
 
     func startControl() async {
         guard let pipeline, let servo, let range, canControl, !isControlling else { return }
+        isSwitching = true
+        defer { isSwitching = false }
         do {
             if controller == nil {
                 controller = try await AssistController(pipeline: pipeline, servo: servo, estimator: estimator,
@@ -366,6 +375,8 @@ final class AppModel {
     func stopControl() async {
         guard let controller, isControlling else { return }
         isControlling = false
+        isSwitching = true
+        defer { isSwitching = false }
         await controller.stop()
         if let telemetry {
             do { try telemetry.finish(); info("Saved \(telemetry.url.lastPathComponent)") } catch { fail(error) }
