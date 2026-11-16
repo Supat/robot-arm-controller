@@ -73,6 +73,24 @@ final class ControllerTests: XCTestCase {
         XCTAssertEqual(status.current, 0, "torque is off after stop")
     }
 
+    func testPipelineKeepsRunningUntilLastHolderStops() async throws {
+        let pipeline = QuasiTensionPipeline(source: SyntheticEMGSource())
+        try await pipeline.start()                       // the app holds the stream while connected
+        let calibrator = await ActivationCalibrator(pipeline: pipeline)
+        try await calibrator.start()
+        _ = await calibrator.stop()
+        var running = await pipeline.isRunning
+        XCTAssertTrue(running, "calibration ending must not stop a stream someone else holds")
+        await pipeline.stop()
+        running = await pipeline.isRunning
+        XCTAssertFalse(running)
+        await pipeline.stop()                            // an unbalanced stop is harmless
+        try await pipeline.start()
+        running = await pipeline.isRunning
+        XCTAssertTrue(running)
+        await pipeline.stop()
+    }
+
     func testChannelMismatchIsRejected() async throws {
         let pipeline = QuasiTensionPipeline(source: SyntheticEMGSource(channelCount: 3))
         do {

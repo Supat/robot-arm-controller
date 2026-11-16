@@ -10,6 +10,9 @@ public actor QuasiTensionPipeline {
     private var qtSinks: [@Sendable (QuasiTensionSample) -> Void] = []
     public private(set) var isRunning = false
     public private(set) var latest: QuasiTensionSample?
+    /// Outstanding `start()` calls. The source runs while at least one is held, so calibration
+    /// and control can hand over without stopping and restarting the stream in between.
+    private var holders = 0
 
     public init(source: EMGSource, outputRate: Double = 200) {
         self.source = source
@@ -23,7 +26,9 @@ public actor QuasiTensionPipeline {
     public func addQuasiTensionSink(_ sink: @escaping @Sendable (QuasiTensionSample) -> Void) { qtSinks.append(sink) }
     public func removeAllSinks() { rawSinks.removeAll(); qtSinks.removeAll() }
 
+    /// Start the source, or join it if it is already running. Balance every call with `stop()`.
     public func start() async throws {
+        holders += 1
         // Claim the running state before suspending, so a second start that arrives while the
         // source is still connecting does not start the source twice.
         guard !isRunning else { return }
@@ -37,12 +42,16 @@ public actor QuasiTensionPipeline {
             }
         } catch {
             isRunning = false
+            holders = 0
             throw error
         }
     }
 
+    /// Release one `start()`. The source stops when the last holder releases it.
     public func stop() async {
-        guard isRunning else { return }
+        guard holders > 0 else { return }
+        holders -= 1
+        guard holders == 0, isRunning else { return }
         isRunning = false
         await source.stop()
     }
@@ -80,13 +89,20 @@ public actor ActivationCalibrator {
     public func start() async throws {
         calibration = MinMaxCalibration(channelCount: pipeline.channelCount, sampleRate: pipeline.outputRate)
         isRunning = true
-        try await pipeline.start()
+        do {
+            try await pipeline.start()
+        } catch {
+            isRunning = false
+            throw error
+        }
     }
 
-    /// Stops the source and returns the calibrated range.
+    /// Releases the pipeline and returns the calibrated range.
     public func stop() async -> ActivationRange {
-        isRunning = false
-        await pipeline.stop()
+        if isRunning {
+            isRunning = false
+            await pipeline.stop()
+        }
         return calibration.finish()
     }
 

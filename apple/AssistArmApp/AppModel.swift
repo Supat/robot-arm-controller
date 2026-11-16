@@ -117,7 +117,7 @@ final class AppModel {
     var servoConnected: Bool { servoPhase == .connected }
     var isBusy: Bool { isCalibrating || isControlling }
     /// Data is flowing into the plot buffers, so the plots should redraw.
-    var isStreaming: Bool { isCalibrating || isControlling }
+    var isStreaming: Bool { emgConnected }
     var canCalibrate: Bool { emgConnected && !isControlling && !isSwitching }
     var canControl: Bool { emgConnected && servoConnected && range != nil && !isCalibrating && !isSwitching }
 
@@ -185,7 +185,7 @@ final class AppModel {
                 info("Trigno \(system.baseSerial): sensors \(slotFlexor) (flexor) and \(slotExtensor) (extensor), \(Int(system.emgRate)) Hz")
             case .lsl:
                 source = LSLEMGSource(streamName: lslStream, columns: [lslColumnFlexor, lslColumnExtensor])
-                info("LSL inlet \"\(lslStream)\" columns \(lslColumnFlexor), \(lslColumnExtensor) (opens when streaming starts)")
+                info("LSL inlet \"\(lslStream)\" columns \(lslColumnFlexor), \(lslColumnExtensor)")
             }
             self.source = source
             sourceName = source.name
@@ -205,6 +205,20 @@ final class AppModel {
             }
             calibrator = await ActivationCalibrator(pipeline: pipeline)
             controller = nil
+            // Stream for as long as the source is connected. Calibration and control then only
+            // join the running stream; stopping and restarting the Trigno base between them
+            // costs several seconds and can deliver the first samples late, in one burst.
+            do {
+                try await pipeline.start()
+            } catch {
+                await session?.close()
+                session = nil
+                self.pipeline = nil
+                self.source = nil
+                calibrator = nil
+                trignoSystem = nil
+                throw error
+            }
             emgPhase = .connected
             info("EMG source ready: \(source.name)")
         } catch {
