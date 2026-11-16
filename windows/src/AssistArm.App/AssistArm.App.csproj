@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Lets the project compile on macOS/Linux for checking; it only runs on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- The Delsys USB driver DLLs are x64. -->
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>AssistArm</AssemblyName>
+    <RootNamespace>AssistArm.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <NoWarn>$(NoWarn);NU1701;NU1603;NU1903;NU1902;MSB3246</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AssistArm.Core\AssistArm.Core.csproj" />
+    <ProjectReference Include="..\AssistArm.Delsys\AssistArm.Delsys.csproj" />
+  </ItemGroup>
+
+</Project>

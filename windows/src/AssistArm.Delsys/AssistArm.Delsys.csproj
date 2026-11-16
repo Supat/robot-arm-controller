@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>AssistArm.Delsys</RootNamespace>
+    <!-- The Delsys packages ship without nullable annotations and pull in old System.* shims. -->
+    <NoWarn>$(NoWarn);NU1701;NU1603;NU1903;NU1902;MSB3246</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- From ..\..\packages, filled by fetch-delsys-packages (see the README). -->
+    <PackageReference Include="DelsysAPI" Version="2.9.7.1088-Main" />
+    <PackageReference Include="Delsys.Drivers" Version="1.2.2.417-main" />
+    <PackageReference Include="Delsys.Signals" Version="2.1.1.28-main" />
+    <PackageReference Include="Filtering" Version="2.1.1.28-main" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AssistArm.Core\AssistArm.Core.csproj" />
+  </ItemGroup>
+
+</Project>

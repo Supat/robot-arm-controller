@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+*.user
+# Delsys's binaries are fetched by fetch-delsys-packages, never committed.
+packages/
+# Never commit the Delsys key or licence.
+delsys-license.json
