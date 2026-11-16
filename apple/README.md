@@ -109,8 +109,8 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
   layout of a particular servo model.
 - Futaba RS servos restart their motion on every goal command. Writing goals at the 50 Hz loop
   rate makes them crawl at a fraction of full speed, so goals are written at `goalUpdateRate`
-  (20 Hz by default, "Goal write rate" under Advanced); 10–20 Hz tracked a sweeping goal with
-  about 0.2 s lag on the bench. `assist-arm track` reproduces the measurement.
+  (6 Hz by default, the legacy cadence; "Goal write rate" under Advanced); 10–20 Hz tracked a
+  sweeping goal with about 0.2 s lag on the bench. `assist-arm track` reproduces the measurement.
 - Normalised stiffness uses the legacy scaling by default ("Legacy stiffness scaling" under
   Advanced): the stiffness model is evaluated at the raw calibration minimum and maximum, which
   with EMG in volts makes the servo stiff whenever either muscle is active, so the arm follows
@@ -124,7 +124,7 @@ The app's debug build accepts `-autoConnect YES` (saved settings) and `-syntheti
   chain is order-dependent, and a network source delivers buffered blocks in bursts after a
   stall, so a task per block would occasionally process them out of order.
 - The legacy loop was a 10 ms timer whose callback slept 100 ms and spent 50 ms on a status read,
-  so it really wrote goals at about 6 Hz. Set "Goal write rate" to 6 to reproduce that feel.
+  so it really wrote goals at about 6 Hz, which is the default "Goal write rate" here.
 - Compliance slope is in degrees: 0xFF means torque ramps over 255° (very soft), 0x32 over 50°.
   Under load the servo settles several degrees short of its goal at 0x32; that is the legacy
   "stiff" setting, not a fault.

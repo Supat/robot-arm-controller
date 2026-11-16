@@ -18,7 +18,9 @@ public struct ControlConfiguration: Codable, Sendable, Equatable {
     /// How often a goal position is written to the servos. Futaba RS servos restart their motion
     /// on every goal command, so writing at the loop rate (50 Hz) makes them crawl at a fraction of
     /// full speed; on the bench 20 Hz tracked a sweeping goal with ~0.2 s lag and 10 Hz was similar.
-    public var goalUpdateRate: Double = 20
+    /// The default is the legacy loop's real cadence (about 6 Hz), which moves more smoothly
+    /// because each goal is a full-speed step and fewer of them restart the servo per second.
+    public var goalUpdateRate: Double = 6
     /// How often servo status (angle, current) is read back for display and logging.
     public var statusPollRate: Double = 5
     /// Legacy set 75 % at zeroing.
