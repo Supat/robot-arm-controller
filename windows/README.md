@@ -53,34 +53,52 @@ Delsys's binaries, so they are downloaded rather than committed here.
 
 ## Using the app
 
-1. **Close the Trigno Control Utility.** The Delsys API talks to the base over USB itself and only
-   one program can hold it.
+No Delsys program has to be running. The app opens the base, pairs and manages sensors, and
+streams by itself.
+
+1. **Close the Trigno Control Utility and Trigno Discover** if they are open. Only one program can
+   hold the base.
 2. **EMG → Delsys API licence**: paste the key and the licence, then *Save licence*. They are
    stored in `%APPDATA%\AssistArm\delsys-license.json`, outside the repository.
-3. Pick the **flexor** and **extensor** sensors by their pair numbers and press **Connect**. The
-   app loads the base, scans for sensors that are already paired, selects those two and starts
-   streaming. Leave *Sample mode* blank to keep each sensor's current mode; after the first
-   connect the list offers the modes the flexor sensor supports.
-4. **Servos**: choose the COM port, then **Connect & zero** with the arm hanging at rest.
-5. **Calibrate**, load the subject's **Model** parameters, choose a **Mode**, and **Start control**.
+3. **Open base**. The app finds the base on USB and scans for sensors that are already paired.
+   The list shows each sensor's pair number, name, EMG rate and battery level.
+4. Manage sensors if needed, while not streaming:
+   - **Pair**: type a free number, press *Pair*, then hold the sensor's button until its light
+     signals pairing. The app waits up to 60 s; *Cancel* stops waiting.
+   - **Identify** flashes the selected sensor's light for five seconds.
+   - **Remove** makes the base forget the selected sensor.
+   - **Rescan** refreshes the list, for example after waking a sensor.
+5. Pick the **flexor** and **extensor** sensors by pair number, and a sample mode for each if the
+   current one has no EMG channel or the two rates differ. Press **Start streaming**.
+   (*Start streaming* opens the base first if it is not open yet.)
+6. **Servos**: choose the COM port, then **Connect & zero** with the arm hanging at rest.
+7. **Calibrate**, load the subject's **Model** parameters, choose a **Mode**, and **Start control**.
+
+*Stop streaming* releases the sensors but keeps the base open, so sensors can be managed again.
 
 Telemetry goes to `Documents\AssistArm\Recordings\assist-<timestamp>.csv`, in the same columns
 as the macOS app. Settings are kept in `%APPDATA%\AssistArm\settings.json`.
 
-The app does not pair sensors. Pair them once with Trigno Discover; the base remembers them.
+What still comes from Delsys: the USB driver for the base station (installed with Trigno
+Discover, which then does not need to be opened), the API packages, and the licence. Base and
+sensor firmware updates are not in the app.
 
 ## Command line
 
 ```powershell
 dotnet run --project src\AssistArm.Cli -- ports
 dotnet run --project src\AssistArm.Cli -- status --port COM3        # read both servos, no motion
+dotnet run --project src\AssistArm.Cli -- base                     # what the base reports about itself
 dotnet run --project src\AssistArm.Cli -- sensors --modes          # scan through the Delsys API
+dotnet run --project src\AssistArm.Cli -- pair --number 3          # then hold the sensor's button
+dotnet run --project src\AssistArm.Cli -- identify --sensor 1      # flash one sensor's light
+dotnet run --project src\AssistArm.Cli -- remove --sensor 3
 dotnet run --project src\AssistArm.Cli -- run --source delsys --sensors 1,2 --servo COM3 --params ..\profiles\hasegawa-2016
 dotnet run --project src\AssistArm.Cli -- run                      # synthetic EMG, simulated servos
 ```
 
-`sensors --verbose` and `run --verbose` print the Delsys API's own debug output, which is the
-first thing to look at when the base or a sensor is not found.
+Every Delsys command takes `--verbose`, which prints the Delsys API's own debug output, the first
+thing to look at when the base or a sensor is not found.
 
 ## Layout
 
@@ -110,7 +128,9 @@ first thing to look at when the base or a sensor is not found.
   contains classes for legacy sensors, but a third-party integration guide lists only
   Avanti-generation sensors and a newer base firmware than `MA2909` as supported. If the scan
   finds nothing, run `sensors --verbose` and compare the firmware it reports.
-- That the pair numbers shown by `sensors` match the sensor numbers used in the Trigno Control
-  Utility.
+- Whether sensors paired with the Trigno Control Utility show up in the scan, with the same
+  numbers. If not, pair them here once.
+- The pairing gesture for these sensors (button hold or a tap on the base), and that *Identify*
+  and *Remove* behave as described.
 - The EMG unit and scale: compare a calibration range here with one from the macOS app for the
   same contraction.

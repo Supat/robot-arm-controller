@@ -181,6 +181,25 @@ public partial class MainWindow : Window
         else await _model.StartControlAsync();
     }
 
+    private async void Base_Click(object sender, RoutedEventArgs e)
+    {
+        if (_model.BaseOpen) await _model.CloseBaseAsync();
+        else await _model.OpenBaseAsync();
+    }
+
+    private async void Rescan_Click(object sender, RoutedEventArgs e) => await _model.RescanAsync();
+    private async void Pair_Click(object sender, RoutedEventArgs e) => await _model.PairAsync();
+    private void CancelPair_Click(object sender, RoutedEventArgs e) => _model.CancelPairing();
+    private async void Identify_Click(object sender, RoutedEventArgs e) => await _model.IdentifySelectedSensorAsync();
+
+    private async void RemoveSensor_Click(object sender, RoutedEventArgs e)
+    {
+        if (_model.SelectedSensor is not { } sensor) return;
+        var answer = MessageBox.Show(this, $"Make the base forget sensor {sensor.PairNumber} ({sensor.Name})? It will have to be paired again before it can be used.",
+                                     "Assist Arm", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+        if (answer == MessageBoxResult.OK) await _model.RemoveSelectedSensorAsync();
+    }
+
     private void ClearRange_Click(object sender, RoutedEventArgs e) => _model.ClearCalibration();
     private void RefreshPorts_Click(object sender, RoutedEventArgs e) => _model.RefreshSerialPorts();
     private void Recordings_Click(object sender, RoutedEventArgs e) => _model.RevealRecordings();

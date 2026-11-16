@@ -2,7 +2,12 @@
 //
 //   assist-arm ports                         list serial ports
 //   assist-arm status --port COM3            read status of servos 1 and 2 (no motion)
-//   assist-arm sensors [--license FILE]      scan for paired Trigno sensors through the Delsys API
+//   assist-arm sensors [--modes]             scan for paired Trigno sensors through the Delsys API
+//   assist-arm base                          show what the base station reports about itself
+//   assist-arm pair --number 3 [--wait 60]   pair a new sensor as number 3 (then press the sensor's button)
+//   assist-arm remove --sensor 3             forget a paired sensor
+//   assist-arm identify --sensor 1 [--seconds 5]   flash one sensor's light
+//     (all Delsys commands take --license FILE and --verbose)
 //   assist-arm run [options]                 calibrate, then control
 //     --source synthetic|delsys       (default synthetic)
 //     --sensors 1,2                   Trigno pair numbers for flexor and extensor (default 1,2)
@@ -40,6 +45,14 @@ void Log(string text) => Console.WriteLine(text);
 
 IServoDriver MakeServo(string spec) =>
     spec.Equals("mock", StringComparison.OrdinalIgnoreCase) ? new MockServoDriver() : new FutabaRsServoDriver(ServoTransports.Make(spec));
+
+void PrintSensor(DelsysSensor s)
+{
+    string battery = s.BatteryPercent is double b ? $", battery {b:F0} %" : "";
+    string range = s.OutOfRange ? ", OUT OF RANGE OR OFF" : "";
+    Log($"sensor {s.PairNumber}: {s.Name} [{s.Kind}] SID {s.Sid}, firmware {s.Firmware}, mode \"{s.CurrentMode}\", EMG {s.EmgSampleRate:F0} Hz{battery}{range}");
+    if (options.ContainsKey("modes")) foreach (var m in s.SampleModes) Log($"    {m}");
+}
 
 void PrintStatus(IServoDriver servo, ControlConfiguration config)
 {
@@ -90,11 +103,48 @@ try
             Log("Scanning for paired sensors…");
             var sensors = await session.ScanAsync();
             if (sensors.Count == 0) Log("No paired sensors found. Take them out of the dock and wake them.");
-            foreach (var s in sensors)
-            {
-                Log($"sensor {s.PairNumber}: {s.Name} (SID {s.Sid}), mode \"{s.CurrentMode}\", EMG {s.EmgSampleRate:F0} Hz");
-                if (options.ContainsKey("modes")) foreach (var m in s.SampleModes) Log($"    {m}");
-            }
+            foreach (var s in sensors) PrintSensor(s);
+            return 0;
+        }
+        case "base":
+        {
+            using var session = OpenDelsys();
+            Log($"Sensor slots: {session.SupportedSlots}");
+            foreach (var (key, value) in session.BaseInfo) Log($"  {key}: {value}");
+            return 0;
+        }
+        case "pair":
+        {
+            using var session = OpenDelsys();
+            await session.ScanAsync();
+            int number = (int)Num("number", 0);
+            if (number <= 0) { Log("Give the pair number with --number N."); return 2; }
+            double wait = Num("wait", 60);
+            Log($"Waiting up to {wait:F0} s for a pair request. Hold the sensor's button until its light signals pairing…");
+            using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(wait));
+            if (!await session.PairAsync(number, cancel.Token)) { Log("No sensor asked to pair."); return 1; }
+            Log("Paired. Scanning…");
+            foreach (var s in await session.ScanAsync()) PrintSensor(s);
+            return 0;
+        }
+        case "remove":
+        {
+            using var session = OpenDelsys();
+            await session.ScanAsync();
+            int number = (int)Num("sensor", 0);
+            session.Remove(number);
+            Log($"Sensor {number} removed.");
+            return 0;
+        }
+        case "identify":
+        {
+            using var session = OpenDelsys();
+            await session.ScanAsync();
+            int number = (int)Num("sensor", 0);
+            session.Identify(number, true);
+            Log($"Sensor {number} should be flashing.");
+            await Task.Delay(TimeSpan.FromSeconds(Num("seconds", 5)));
+            session.Identify(number, false);
             return 0;
         }
         case "run":
@@ -133,7 +183,8 @@ async Task<int> Run()
         var pairs = Opt("sensors", "1,2").Split(',').Select(s => int.Parse(s.Trim())).ToArray();
         Log("Scanning for paired sensors…");
         await session.ScanAsync();
-        source = await session.CreateSourceAsync(pairs[0], pairs[1], options.ContainsKey("sensor-mode") ? Opt("sensor-mode") : null);
+        string? mode = options.ContainsKey("sensor-mode") ? Opt("sensor-mode") : null;
+        source = await session.CreateSourceAsync(pairs[0], pairs[1], mode, mode);
         Log($"Sensors {pairs[0]} (flexor) and {pairs[1]} (extensor), EMG {source.SampleRate:F0} Hz");
     }
     else

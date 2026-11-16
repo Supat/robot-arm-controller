@@ -25,23 +25,8 @@
                         <ComboBox ItemsSource="{Binding EmgKinds}" SelectedItem="{Binding EmgKind}" ItemTemplate="{StaticResource EnumItem}"
                                   IsEnabled="{Binding EmgDisconnected}" />
                         <StackPanel Visibility="{Binding IsDelsys, Converter={StaticResource Visible}}">
-                            <Grid IsEnabled="{Binding EmgDisconnected}">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="70" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Flexor sensor" Style="{StaticResource FieldLabel}" />
-                                <ComboBox Grid.Column="1" ItemsSource="{Binding SensorNumbers}" SelectedItem="{Binding FlexorSensor}" />
-                                <TextBlock Grid.Column="2" Text="Extensor sensor" Style="{StaticResource FieldLabel}" Margin="12,0,8,0" />
-                                <ComboBox Grid.Column="3" ItemsSource="{Binding SensorNumbers}" SelectedItem="{Binding ExtensorSensor}" />
-                            </Grid>
-                            <TextBlock Text="Sample mode (blank keeps each sensor's current mode)" Style="{StaticResource Caption}" />
-                            <ComboBox IsEditable="True" ItemsSource="{Binding SampleModes}" Text="{Binding SensorMode, UpdateSourceTrigger=LostFocus}"
-                                      IsEnabled="{Binding EmgDisconnected}" />
                             <Expander Header="Delsys API licence" Margin="0,4,0,0">
-                                <StackPanel IsEnabled="{Binding EmgDisconnected}">
+                                <StackPanel IsEnabled="{Binding CanEditLicense}">
                                     <TextBlock Text="Key" Style="{StaticResource Caption}" />
                                     <TextBox Text="{Binding DelsysKey, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
                                              MaxHeight="70" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11" />
@@ -52,8 +37,54 @@
                                     <TextBlock Style="{StaticResource Caption}" Text="{Binding LicensePath, StringFormat=Saved outside the project folder: {0}}" />
                                 </StackPanel>
                             </Expander>
+
+                            <Button Content="{Binding BaseButtonText}" Click="Base_Click" HorizontalAlignment="Left" IsEnabled="{Binding CanToggleBase}" />
+                            <TextBlock Text="{Binding BaseDetail}" Style="{StaticResource Caption}" />
+
+                            <!-- Sensor management: everything the Trigno utilities are otherwise needed for. -->
+                            <StackPanel Visibility="{Binding BaseOpen, Converter={StaticResource Visible}}" Margin="0,6,0,0">
+                                <TextBlock Text="Paired sensors" FontWeight="SemiBold" />
+                                <ListBox ItemsSource="{Binding Sensors}" SelectedItem="{Binding SelectedSensor}" MaxHeight="150" Margin="0,2"
+                                         DisplayMemberPath="Summary" />
+                                <StackPanel Orientation="Horizontal" IsEnabled="{Binding CanManageSensors}">
+                                    <Button Content="Rescan" Click="Rescan_Click" />
+                                    <Button Content="Identify" Click="Identify_Click" Margin="6,4,0,0"
+                                            ToolTip="Flash the selected sensor's light for five seconds" />
+                                    <Button Content="Remove" Click="RemoveSensor_Click" Margin="6,4,0,0"
+                                            ToolTip="Make the base forget the selected sensor" />
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                    <TextBlock Text="Pair a new sensor as number" Style="{StaticResource FieldLabel}" />
+                                    <TextBox Width="44" Text="{Binding PairNumberText, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanManageSensors}" />
+                                    <Button Content="Pair" Click="Pair_Click" Margin="6,2,0,2" IsEnabled="{Binding CanManageSensors}"
+                                            Visibility="{Binding NotPairing, Converter={StaticResource Visible}}" />
+                                    <Button Content="Cancel" Click="CancelPair_Click" Margin="6,2,0,2"
+                                            Visibility="{Binding IsPairing, Converter={StaticResource Visible}}" />
+                                </StackPanel>
+                                <TextBlock Text="{Binding PairStatus}" Style="{StaticResource Caption}" Foreground="#B26A00"
+                                           Visibility="{Binding IsPairing, Converter={StaticResource Visible}}" />
+                            </StackPanel>
+
+                            <Grid IsEnabled="{Binding CanChooseSensors}" Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="56" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition /><RowDefinition />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="Flexor sensor" Style="{StaticResource FieldLabel}" />
+                                <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding SensorNumbers}" SelectedItem="{Binding FlexorSensor}" />
+                                <ComboBox Grid.Row="0" Grid.Column="2" Margin="6,2,0,2" IsEditable="True" ItemsSource="{Binding FlexorModes}"
+                                          Text="{Binding FlexorMode, UpdateSourceTrigger=LostFocus}" ToolTip="Sample mode; blank keeps the sensor's current mode" />
+                                <TextBlock Grid.Row="1" Text="Extensor sensor" Style="{StaticResource FieldLabel}" />
+                                <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding SensorNumbers}" SelectedItem="{Binding ExtensorSensor}" />
+                                <ComboBox Grid.Row="1" Grid.Column="2" Margin="6,2,0,2" IsEditable="True" ItemsSource="{Binding ExtensorModes}"
+                                          Text="{Binding ExtensorMode, UpdateSourceTrigger=LostFocus}" ToolTip="Sample mode; blank keeps the sensor's current mode" />
+                            </Grid>
                             <TextBlock Style="{StaticResource Caption}"
-                                       Text="The Trigno base connects to this PC by USB. Close the Trigno Control Utility first; only one program can use the base." />
+                                       Text="Sample mode on the right; leave it blank to keep the sensor's current mode. Both sensors must sample EMG at the same rate." />
                         </StackPanel>
                         <Button Content="{Binding EmgButtonText}" Click="Emg_Click" HorizontalAlignment="Left" />
                         <TextBlock Text="{Binding EmgDetail}" Style="{StaticResource Caption}" />

@@ -34,8 +34,9 @@ public sealed class AppSettings
     public EmgSourceKind EmgKind { get; set; } = EmgSourceKind.Delsys;
     public int FlexorSensor { get; set; } = 1;
     public int ExtensorSensor { get; set; } = 2;
-    /// <summary>Sample mode name applied to both sensors; empty keeps each sensor's current mode.</summary>
-    public string SensorMode { get; set; } = "";
+    /// <summary>Sample mode names; empty keeps the sensor's current mode.</summary>
+    public string FlexorMode { get; set; } = "";
+    public string ExtensorMode { get; set; } = "";
     public ServoKind ServoKind { get; set; } = ServoKind.Serial;
     public string SerialPort { get; set; } = "";
     public string BridgeHost { get; set; } = "192.168.1.60";
@@ -104,6 +105,8 @@ public sealed class AppModel : INotifyPropertyChanged
                      nameof(IsControlling), nameof(NotCalibrating), nameof(CalibrateText), nameof(HasRange), nameof(RangeText), nameof(ControlHint),
                      nameof(EmgDetail), nameof(ServoDetail), nameof(WindowTitle), nameof(IsDelsys), nameof(IsSerial), nameof(IsTcp),
                      nameof(ShowThreshold), nameof(ModeFooter), nameof(ModelName), nameof(ModelFooter), nameof(UsesCustomParameters),
+                     nameof(BaseOpen), nameof(BaseButtonText), nameof(BaseDetail), nameof(CanToggleBase), nameof(CanManageSensors),
+                     nameof(CanEditLicense), nameof(IsPairing), nameof(NotPairing), nameof(PairStatus), nameof(CanChooseSensors),
                  })
             Raise(name);
     }
@@ -119,9 +122,10 @@ public sealed class AppModel : INotifyPropertyChanged
     public double[] PlotWindows { get; } = [2, 5, 10, 20];
 
     public EmgSourceKind EmgKind { get => _settings.EmgKind; set { _settings.EmgKind = value; SaveSettings(); Raise(); RaiseState(); } }
-    public int FlexorSensor { get => _settings.FlexorSensor; set { _settings.FlexorSensor = value; SaveSettings(); Raise(); } }
-    public int ExtensorSensor { get => _settings.ExtensorSensor; set { _settings.ExtensorSensor = value; SaveSettings(); Raise(); } }
-    public string SensorMode { get => _settings.SensorMode; set { _settings.SensorMode = value ?? ""; SaveSettings(); Raise(); } }
+    public int FlexorSensor { get => _settings.FlexorSensor; set { _settings.FlexorSensor = value; SaveSettings(); Raise(); RefreshModeLists(); } }
+    public int ExtensorSensor { get => _settings.ExtensorSensor; set { _settings.ExtensorSensor = value; SaveSettings(); Raise(); RefreshModeLists(); } }
+    public string FlexorMode { get => _settings.FlexorMode; set { _settings.FlexorMode = value ?? ""; SaveSettings(); Raise(); } }
+    public string ExtensorMode { get => _settings.ExtensorMode; set { _settings.ExtensorMode = value ?? ""; SaveSettings(); Raise(); } }
     public ServoKind ServoKind { get => _settings.ServoKind; set { _settings.ServoKind = value; SaveSettings(); Raise(); RaiseState(); } }
     public string SerialPort { get => _settings.SerialPort; set { _settings.SerialPort = value ?? ""; SaveSettings(); Raise(); RaiseState(); } }
     public string BridgeHost { get => _settings.BridgeHost; set { _settings.BridgeHost = value; SaveSettings(); Raise(); } }
@@ -203,7 +207,41 @@ public sealed class AppModel : INotifyPropertyChanged
 
     public ObservableCollection<LogEntry> Log { get; } = [];
     public ObservableCollection<string> SerialPorts { get; } = [];
-    public ObservableCollection<string> SampleModes { get; } = [];
+    /// <summary>Sensors paired with the base, as of the last scan.</summary>
+    public ObservableCollection<DelsysSensor> Sensors { get; } = [];
+    public ObservableCollection<string> FlexorModes { get; } = [];
+    public ObservableCollection<string> ExtensorModes { get; } = [];
+
+    private bool _baseOpen, _baseBusy, _isPairing;
+    private string _pairStatus = "";
+    private string _pairNumberText = "";
+    private DelsysSensor? _selectedSensor;
+    private CancellationTokenSource? _pairCancel;
+    private int? _identifying;
+
+    public DelsysSensor? SelectedSensor { get => _selectedSensor; set { _selectedSensor = value; Raise(); } }
+    public string PairNumberText { get => _pairNumberText; set { _pairNumberText = value ?? ""; Raise(); } }
+    public bool BaseOpen => _baseOpen;
+    public bool IsPairing => _isPairing;
+    public bool NotPairing => !_isPairing;
+    public string PairStatus => _pairStatus;
+    public bool CanToggleBase => !_baseBusy && _emgPhase != Phase.Connecting && !IsBusy;
+    /// <summary>Sensors can be scanned, paired, removed and identified while the base is open and not streaming.</summary>
+    public bool CanManageSensors => _baseOpen && !_baseBusy && _emgPhase == Phase.Disconnected;
+    public bool CanChooseSensors => _emgPhase == Phase.Disconnected;
+    public bool CanEditLicense => !_baseOpen && !_baseBusy;
+    public string BaseButtonText => _baseBusy && !_baseOpen ? "Opening…" : _baseOpen ? "Close base" : "Open base";
+
+    public string BaseDetail
+    {
+        get
+        {
+            if (!_baseOpen || _session is not { } session) return "The Trigno base connects to this PC by USB. No Delsys program needs to be running; close the Trigno Control Utility and Trigno Discover, because only one program can use the base.";
+            string firmware = session.BaseInfo.FirstOrDefault(kv => kv.Key.Contains("firmware", StringComparison.OrdinalIgnoreCase)).Value ?? "";
+            return $"{session.DeviceName}" + (firmware.Length > 0 ? $" · firmware {firmware}" : "") +
+                   $" · {Sensors.Count} of {session.SupportedSlots} sensor slots paired";
+        }
+    }
 
     private DelsysSession? _session;
     private IEmgSource? _source;
@@ -245,7 +283,14 @@ public sealed class AppModel : INotifyPropertyChanged
     public bool ShowThreshold => StiffnessMode is StiffnessMode.HighOrLow or StiffnessMode.Linear;
     public bool UsesCustomParameters => _settings.ParamEqPath.Length > 0 || _settings.ParamTrqPath.Length > 0;
 
-    public string EmgButtonText => _emgPhase switch { Phase.Connecting => "Connecting…", Phase.Connected => "Disconnect", _ => "Connect" };
+    public string EmgButtonText => (_emgPhase, IsDelsys) switch
+    {
+        (Phase.Connecting, _) => "Connecting…",
+        (Phase.Connected, true) => "Stop streaming",
+        (Phase.Connected, false) => "Disconnect",
+        (_, true) => "Start streaming",
+        _ => "Connect",
+    };
     public string ServoButtonText => _servoPhase switch { Phase.Connecting => "Zeroing…", Phase.Connected => "Disconnect", _ => "Connect & zero" };
     public string CalibrateText => _isCalibrating ? $"Stop ({_calibrationElapsed:F0} s)" : "Calibrate";
     public string WindowTitle => EmgConnected ? $"Assist Arm — {_sourceName}" : "Assist Arm — not connected";
@@ -340,24 +385,21 @@ public sealed class AppModel : INotifyPropertyChanged
             }
             else
             {
-                var credentials = new DelsysCredentials(DelsysKey.Trim(), DelsysLicense.Trim());
-                var session = new DelsysSession(credentials);
-                session.Debug += text => Debug.WriteLine("[delsys] " + text);
-                _session = session;
-                int flexor = FlexorSensor, extensor = ExtensorSensor;
-                string? mode = SensorMode.Trim().Length > 0 ? SensorMode.Trim() : null;
-                // The API blocks while it talks to the base, so keep it off the UI thread.
-                var (delsysSource, sensors) = await Task.Run(async () =>
+                if (!_baseOpen)
                 {
-                    session.Open();
-                    var found = await session.ScanAsync();
-                    var created = await session.CreateSourceAsync(flexor, extensor, mode);
-                    return (created, found);
-                });
-                source = delsysSource;
-                SampleModes.Clear();
-                foreach (var m in sensors.FirstOrDefault(s => s.PairNumber == flexor)?.SampleModes ?? []) SampleModes.Add(m);
-                _sourceDetail = $"{session.DeviceName} · {sensors.Count} paired sensors · EMG {source.SampleRate:F0} Hz";
+                    _emgPhase = Phase.Disconnected;
+                    await OpenBaseAsync();
+                    if (!_baseOpen) { RaiseState(); return; }
+                    _emgPhase = Phase.Connecting;
+                    RaiseState();
+                }
+                var session = _session!;
+                int flexor = FlexorSensor, extensor = ExtensorSensor;
+                string flexorMode = FlexorMode.Trim(), extensorMode = ExtensorMode.Trim();
+                // The API blocks while it talks to the base, so keep it off the UI thread.
+                source = await Task.Run(() => session.CreateSourceAsync(flexor, extensor, flexorMode, extensorMode));
+                ShowSensors(session.Sensors);
+                _sourceDetail = $"Streaming sensors {flexor} (flexor) and {extensor} (extensor) · EMG {source.SampleRate:F0} Hz";
                 Info($"{session.DeviceName}: sensors {flexor} (flexor) and {extensor} (extensor), {source.SampleRate:F0} Hz");
             }
             _source = source;
@@ -394,17 +436,190 @@ public sealed class AppModel : INotifyPropertyChanged
         RaiseState();
     }
 
+    /// <summary>Forget the stream. The base stays open so sensors can be managed again.</summary>
     private async Task DropEmgAsync()
     {
-        var session = _session;
-        _session = null;
         _pipeline = null;
         _calibrator = null;
         _controller = null;
         _source = null;
         Buffers = null;
-        if (session is not null) await Task.Run(session.Dispose);
+        if (_session is { IsOpen: true } session)
+        {
+            try
+            {
+                await Task.Run(session.ReleaseAsync);
+                ShowSensors(session.Sensors);
+            }
+            catch (Exception e) { Info($"Releasing the Trigno stream: {e.Message}", isError: true); }
+        }
         BuffersChanged?.Invoke();
+    }
+
+    // MARK: Trigno base and sensors (Delsys API)
+
+    private void ShowSensors(IReadOnlyList<DelsysSensor> sensors)
+    {
+        int? selected = _selectedSensor?.PairNumber;
+        Sensors.Clear();
+        foreach (var sensor in sensors) Sensors.Add(sensor);
+        SelectedSensor = Sensors.FirstOrDefault(s => s.PairNumber == selected);
+        RefreshModeLists();
+        Raise(nameof(BaseDetail));
+    }
+
+    private void RefreshModeLists()
+    {
+        void Fill(ObservableCollection<string> list, int pairNumber)
+        {
+            list.Clear();
+            list.Add(""); // keep the sensor's current mode
+            foreach (var mode in Sensors.FirstOrDefault(s => s.PairNumber == pairNumber)?.SampleModes ?? []) list.Add(mode);
+        }
+        Fill(FlexorModes, FlexorSensor);
+        Fill(ExtensorModes, ExtensorSensor);
+        Raise(nameof(FlexorMode));
+        Raise(nameof(ExtensorMode));
+    }
+
+    /// <summary>Run one blocking Delsys operation off the UI thread, with the sensor buttons disabled meanwhile.</summary>
+    private async Task<bool> WithBaseAsync(Func<DelsysSession, Task> work)
+    {
+        if (_session is not { } session || _baseBusy) return false;
+        _baseBusy = true;
+        RaiseState();
+        try
+        {
+            await Task.Run(() => work(session));
+            return true;
+        }
+        catch (Exception e)
+        {
+            Fail(e);
+            return false;
+        }
+        finally
+        {
+            _baseBusy = false;
+            RaiseState();
+        }
+    }
+
+    public async Task OpenBaseAsync()
+    {
+        if (_baseOpen || _baseBusy) return;
+        _baseBusy = true;
+        RaiseState();
+        DelsysSession? session = null;
+        try
+        {
+            session = new DelsysSession(new DelsysCredentials(DelsysKey.Trim(), DelsysLicense.Trim()));
+            session.Debug += text => Debug.WriteLine("[delsys] " + text);
+            var opened = session;
+            var sensors = await Task.Run(async () =>
+            {
+                opened.Open();
+                return await opened.ScanAsync();
+            });
+            _session = session;
+            _baseOpen = true;
+            ShowSensors(sensors);
+            Info($"{session.DeviceName}: {sensors.Count} paired sensor{(sensors.Count == 1 ? "" : "s")} found");
+        }
+        catch (Exception e)
+        {
+            if (session is not null) await Task.Run(session.Dispose);
+            Fail(e);
+        }
+        _baseBusy = false;
+        RaiseState();
+    }
+
+    public async Task CloseBaseAsync()
+    {
+        if (!_baseOpen) return;
+        if (EmgConnected) await DisconnectEmgAsync();
+        CancelPairing();
+        var session = _session;
+        _session = null;
+        _baseOpen = false;
+        Sensors.Clear();
+        RefreshModeLists();
+        if (session is not null) await Task.Run(session.Dispose);
+        Info("Trigno base closed");
+        RaiseState();
+    }
+
+    public async Task RescanAsync()
+    {
+        IReadOnlyList<DelsysSensor> sensors = [];
+        if (await WithBaseAsync(async session => sensors = await session.ScanAsync()))
+        {
+            ShowSensors(sensors);
+            Info($"Scan found {sensors.Count} paired sensor{(sensors.Count == 1 ? "" : "s")}");
+        }
+    }
+
+    /// <summary>Pair a new sensor under the number typed into the pairing box, then rescan.</summary>
+    public async Task PairAsync()
+    {
+        if (!int.TryParse(PairNumberText.Trim(), out int number) || number < 1)
+        {
+            Fail(new DelsysException("Enter the number to pair the sensor as (1 or higher)."));
+            return;
+        }
+        var cancel = _pairCancel = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        _isPairing = true;
+        _pairStatus = $"Waiting for sensor {number}: hold the sensor's button until its light signals pairing (60 s)…";
+        RaiseState();
+        bool paired = false;
+        IReadOnlyList<DelsysSensor> sensors = [];
+        bool ran = await WithBaseAsync(async session =>
+        {
+            paired = await session.PairAsync(number, cancel.Token);
+            if (paired) sensors = await session.ScanAsync();
+        });
+        _isPairing = false;
+        _pairCancel = null;
+        _pairStatus = "";
+        if (ran && paired)
+        {
+            ShowSensors(sensors);
+            PairNumberText = "";
+            Info($"Sensor {number} paired");
+        }
+        else if (ran)
+        {
+            Info($"No sensor asked to pair as number {number}", isError: true);
+        }
+        RaiseState();
+    }
+
+    public void CancelPairing() => _pairCancel?.Cancel();
+
+    public async Task RemoveSelectedSensorAsync()
+    {
+        if (SelectedSensor is not { } sensor) return;
+        IReadOnlyList<DelsysSensor> sensors = [];
+        if (await WithBaseAsync(session => { session.Remove(sensor.PairNumber); sensors = session.Sensors; return Task.CompletedTask; }))
+        {
+            ShowSensors(sensors);
+            Info($"Sensor {sensor.PairNumber} removed");
+        }
+    }
+
+    /// <summary>Flash the selected sensor's light for a few seconds.</summary>
+    public async Task IdentifySelectedSensorAsync()
+    {
+        if (SelectedSensor is not { } sensor || _identifying is not null) return;
+        _identifying = sensor.PairNumber;
+        if (await WithBaseAsync(session => { session.Identify(sensor.PairNumber, true); return Task.CompletedTask; }))
+        {
+            Info($"Sensor {sensor.PairNumber} is flashing");
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            await WithBaseAsync(session => { session.Identify(sensor.PairNumber, false); return Task.CompletedTask; });
+        }
+        _identifying = null;
     }
 
     public async Task DisconnectEmgAsync()
@@ -676,6 +891,7 @@ public sealed class AppModel : INotifyPropertyChanged
         try
         {
             if (EmgConnected) await DisconnectEmgAsync();
+            if (BaseOpen) await CloseBaseAsync();
             if (ServoConnected) await DisconnectServoAsync();
         }
         catch (Exception)

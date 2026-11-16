@@ -53,8 +53,16 @@ public sealed record DelsysCredentials(string Key, string License)
 /// <summary>A paired sensor found by a scan.</summary>
 /// <param name="PairNumber">The number the sensor was paired as (the "sensor 1, sensor 2" of the Trigno utility).</param>
 /// <param name="Sid">The sensor's serial ID.</param>
+/// <param name="Kind">The API's class for this sensor model, e.g. "Avanti" or "StandardLegacy".</param>
 /// <param name="EmgSampleRate">EMG rate in the current mode, or 0 if the current mode has no EMG channel.</param>
-public sealed record DelsysSensor(int PairNumber, int Sid, string Name, string CurrentMode, IReadOnlyList<string> SampleModes, double EmgSampleRate);
+/// <param name="BatteryPercent">Charge level as the sensor last reported it, or null if it has not.</param>
+public sealed record DelsysSensor(int PairNumber, int Sid, string Name, string Kind, string Firmware, string CurrentMode,
+                                  IReadOnlyList<string> SampleModes, double EmgSampleRate, double? BatteryPercent, bool OutOfRange)
+{
+    public string Summary =>
+        $"{PairNumber}: {Name}" + (EmgSampleRate > 0 ? $" · EMG {EmgSampleRate:F0} Hz" : " · no EMG in this mode") +
+        (BatteryPercent is double b ? $" · {b:F0} %" : "") + (OutOfRange ? " · out of range or off" : "");
+}
 
 /// <summary>
 /// One connection to a Trigno base through the Delsys API: load the base, scan for paired
@@ -71,6 +79,10 @@ public sealed class DelsysSession : IDisposable
     public event Action<string>? Debug;
 
     public string DeviceName { get; private set; } = "";
+    /// <summary>What the base reports about itself (hardware name, serial, firmware…), for display.</summary>
+    public IReadOnlyDictionary<string, string> BaseInfo { get; private set; } = new Dictionary<string, string>();
+    /// <summary>How many sensors the base can pair, or 0 before it is open.</summary>
+    public int SupportedSlots { get; private set; }
     public bool IsOpen => _pipeline is not null;
     internal Pipeline Pipeline => _pipeline ?? throw new DelsysException("The Trigno base is not connected.");
 
@@ -113,6 +125,10 @@ public sealed class DelsysSession : IDisposable
         }
         _pipeline.SetActiveDataSources(SourceType.TRIGNO_RF);
         DeviceName = DescribeDevice(_pipeline);
+        try { BaseInfo = new Dictionary<string, string>(_pipeline.DataSourceInfo[SourceType.TRIGNO_RF][0]); }
+        catch (Exception) { /* purely informational */ }
+        try { SupportedSlots = _pipeline.TrignoRfManager.SupportedNumberOfSlots(); }
+        catch (Exception) { /* purely informational */ }
     }
 
     private static string DescribeDevice(Pipeline pipeline)
@@ -172,7 +188,66 @@ public sealed class DelsysSession : IDisposable
         var modes = sensor.Configuration?.SampleModes ?? [];
         string mode = sensor.Configuration?.ModeString ?? "";
         string name = string.IsNullOrWhiteSpace(sensor.FriendlyName) ? sensor.InternalName ?? "Sensor" : sensor.FriendlyName;
-        return new DelsysSensor(sensor.PairNumber, sensor.Properties?.Sid ?? 0, name, mode, modes, EmgChannel(sensor)?.SampleRate ?? 0);
+        string kind = sensor.GetType().Name;
+        if (kind.StartsWith("Sensor", StringComparison.Ordinal)) kind = kind[6..];
+        var properties = sensor.Properties;
+        double? battery = properties is not null && properties.BatteryPercent > 0 ? properties.BatteryPercent : null;
+        return new DelsysSensor(sensor.PairNumber, properties?.Sid ?? 0, name, kind, properties?.Fw ?? "", mode, modes,
+                                EmgChannel(sensor)?.SampleRate ?? 0, battery, properties?.OutOfRangeOrOff ?? false);
+    }
+
+    /// <summary>
+    /// The pipeline can only be scanned or re-paired while it is not armed. Stop and disarm it
+    /// (after streaming) so sensors can be managed again.
+    /// </summary>
+    public async Task ReleaseAsync()
+    {
+        var pipeline = Pipeline;
+        if (pipeline.CurrentState == Pipeline.ProcessState.Running) await pipeline.Stop().ConfigureAwait(false);
+        if (pipeline.CurrentState is Pipeline.ProcessState.Armed or Pipeline.ProcessState.Finished
+            or Pipeline.ProcessState.InputsConfigured or Pipeline.ProcessState.OutputsConfigured)
+            await pipeline.DisarmPipeline().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pair a new sensor with the base as <paramref name="pairNumber"/>. The API waits for a
+    /// pair request from the sensor: hold the sensor's button (or tap it on the base's pairing
+    /// mark, depending on the model) until its light signals pairing. Returns false if no
+    /// sensor asked to pair before <paramref name="cancel"/> fired. Scan afterwards.
+    /// </summary>
+    public async Task<bool> PairAsync(int pairNumber, CancellationToken cancel)
+    {
+        var manager = Pipeline.TrignoRfManager;
+        if (SupportedSlots > 0 && manager.Components.Count >= SupportedSlots)
+            throw new DelsysException($"The base already has {manager.Components.Count} sensors paired, which is all it supports.");
+        if (manager.Components.Any(c => c.PairNumber == pairNumber))
+            throw new DelsysException($"A sensor is already paired as number {pairNumber}. Remove it first or choose another number.");
+        try
+        {
+            return await manager.AddTrignoComponent(cancel, pairNumber, true).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            try { manager.CancelledPairingCleanup(); } catch (Exception) { /* nothing was half-paired */ }
+            return false;
+        }
+    }
+
+    /// <summary>Forget a paired sensor.</summary>
+    public void Remove(int pairNumber)
+    {
+        if (!Pipeline.TrignoRfManager.RemoveTrignoComponent(Find(pairNumber)))
+            throw new DelsysException($"The base did not remove sensor {pairNumber}.");
+    }
+
+    /// <summary>Make a sensor flash its light so it can be told apart from the others, or stop the flashing.</summary>
+    public void Identify(int pairNumber, bool on)
+    {
+        var manager = Pipeline.TrignoRfManager;
+        if (!on) { manager.StopSensorIdentification(); return; }
+        int sid = Find(pairNumber).Properties?.Sid ?? 0;
+        if (!manager.SensorIdentification(sid))
+            throw new DelsysException($"Sensor {pairNumber} did not acknowledge the identify request.");
     }
 
     internal static ChannelTrigno? EmgChannel(SensorTrignoRf sensor) =>
@@ -185,14 +260,15 @@ public sealed class DelsysSession : IDisposable
 
     /// <summary>
     /// Select the two sensors used as the joint's muscles (and only those) and return a source
-    /// for their EMG channels. <paramref name="mode"/> picks a sample mode by name for both;
-    /// null keeps each sensor's current mode.
+    /// for their EMG channels. A mode picks that sensor's sample mode by name; null keeps the
+    /// sensor's current mode.
     /// </summary>
-    public async Task<DelsysEmgSource> CreateSourceAsync(int flexorPair, int extensorPair, string? mode = null)
+    public async Task<DelsysEmgSource> CreateSourceAsync(int flexorPair, int extensorPair, string? flexorMode = null, string? extensorMode = null)
     {
         if (flexorPair == extensorPair) throw new DelsysException("Flexor and extensor must be two different sensors.");
+        await ReleaseAsync().ConfigureAwait(false);
         var pipeline = Pipeline;
-        var chosen = new[] { Find(flexorPair), Find(extensorPair) };
+        var modes = new[] { flexorMode, extensorMode };        var chosen = new[] { Find(flexorPair), Find(extensorPair) };
         foreach (var sensor in pipeline.TrignoRfManager.Components)
         {
             bool wanted = chosen.Contains(sensor);
@@ -205,6 +281,7 @@ public sealed class DelsysSession : IDisposable
         for (int i = 0; i < 2; i++)
         {
             var sensor = chosen[i];
+            string? mode = string.IsNullOrWhiteSpace(modes[i]) ? null : modes[i];
             if (mode is not null)
             {
                 if (!(sensor.Configuration?.SampleModes ?? []).Contains(mode))
@@ -226,9 +303,9 @@ public sealed class DelsysSession : IDisposable
         if (pipeline is null) return;
         try
         {
-            if (pipeline.CurrentState == Pipeline.ProcessState.Running) pipeline.Stop().GetAwaiter().GetResult();
-            if (pipeline.CurrentState is Pipeline.ProcessState.Armed or Pipeline.ProcessState.Finished)
-                pipeline.DisarmPipeline().GetAwaiter().GetResult();
+            _pipeline = pipeline;
+            try { ReleaseAsync().GetAwaiter().GetResult(); }
+            finally { _pipeline = null; }
             int index = PipelineController.Instance.PipelineIds.IndexOf(pipeline);
             if (index >= 0) PipelineController.Instance.RemovePipeline(index);
         }
